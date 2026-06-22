@@ -15,8 +15,8 @@ use regex::Regex;
 use std::path::{Path, PathBuf};
 
 mod config;
-mod svg;
 mod fonts;
+mod svg;
 use config::TypePressConfig;
 
 // ── CLI ────────────────────────────────────────────────────────────────

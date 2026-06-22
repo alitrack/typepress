@@ -154,7 +154,9 @@ pub struct UnicodeTextItem {
     pub page: u32,
     pub x: f32,
     pub y: f32,
+    #[allow(dead_code)]
     pub width: f32,
+    #[allow(dead_code)]
     pub height: f32,
     pub text: String,
     pub font: String,

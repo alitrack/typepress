@@ -146,6 +146,7 @@ fn dirs_sys() -> Option<PathBuf> {
 }
 
 /// Scan a directory for font files and return their paths.
+#[allow(dead_code)]
 pub fn scan_font_dir(dir: &Path) -> Vec<PathBuf> {
     let mut fonts = Vec::new();
     if let Ok(entries) = std::fs::read_dir(dir) {
