@@ -25,6 +25,9 @@ usvg = "0.45"
 # Error handling
 anyhow = "1"
 tempfile = "3"
+# Config
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
 # Logging
 log = "0.4"
 env_logger = "0.11"

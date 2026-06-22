@@ -14,6 +14,9 @@ use fulgur::engine::Engine;
 use regex::Regex;
 use std::path::{Path, PathBuf};
 
+mod config;
+use config::TypePressConfig;
+
 // ── CLI ────────────────────────────────────────────────────────────────
 
 #[derive(Parser)]
@@ -26,9 +29,9 @@ struct Cli {
     #[arg(long)]
     stdin: bool,
 
-    /// Output PDF file path (use "-" for stdout)
+    /// Output PDF file path (use "-" for stdout). Required in CLI mode, optional with --config.
     #[arg(short, long)]
-    output: PathBuf,
+    output: Option<PathBuf>,
 
     // ── Input format ──
     /// Input format: html (default) or md (markdown)
@@ -43,6 +46,11 @@ struct Cli {
     /// Scale factor for PNG output (default: 2.0 for retina)
     #[arg(long, default_value = "2.0")]
     scale: f32,
+
+    // ── Config ──
+    /// YAML config file (auto-detects typepress.yaml if omitted)
+    #[arg(short = 'c', long)]
+    config: Option<PathBuf>,
 
     // ── Page ──
     /// Page size: A4, Letter, A3, etc.
@@ -502,10 +510,25 @@ fn render_svg_from_pdf(pdf_bytes: &[u8]) -> Result<String> {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Load config: --config <file> or auto-detect typepress.yaml
+    let cfg = if let Some(ref path) = cli.config {
+        TypePressConfig::from_file(path).ok()
+    } else {
+        TypePressConfig::auto_detect().map(|(c, _)| c)
+    };
+
+    // Merge: CLI args override YAML values.
+    let input_file = cli.input.clone().or_else(|| cfg.as_ref().and_then(|c| c.input.clone()));
+    let is_md = cli.from == "md"
+        || input_file.as_ref().and_then(|p| p.extension()).map_or(false, |e| e == "md")
+        || cfg.as_ref().and_then(|c| c.from.as_deref()) == Some("md");
+    let header = cli.header.clone().or_else(|| cfg.as_ref().and_then(|c| c.header.clone()));
+    let footer = cli.footer.clone().or_else(|| cfg.as_ref().and_then(|c| c.footer.clone()));
+
     let base_path = if cli.stdin {
         std::env::current_dir().ok()
     } else {
-        cli.input.as_ref().and_then(|p| {
+        input_file.as_ref().and_then(|p| {
             p.canonicalize()
                 .ok()
                 .and_then(|abs| abs.parent().map(|d| d.to_path_buf()))
@@ -518,12 +541,10 @@ fn main() -> Result<()> {
         })
     };
 
-    let mut html = read_input(cli.input.as_ref(), cli.stdin)?;
+    let mut html = read_input(input_file.as_ref(), cli.stdin)?;
 
     // 0a. Process Mermaid diagrams (before markdown→HTML conversion,
     // since mermaid blocks are markdown syntax, not HTML)
-    let is_md = cli.from == "md"
-        || cli.input.as_ref().and_then(|p| p.extension()).map_or(false, |e| e == "md");
     if is_md {
         match process_mermaid(&mut html) {
             Ok(n) if n > 0 => eprintln!("Rendered {n} mermaid diagram(s)"),
@@ -538,7 +559,7 @@ fn main() -> Result<()> {
     }
 
     // 1. Inject header/footer
-    let header_css = inject_header_footer(&mut html, cli.header.as_deref(), cli.footer.as_deref());
+    let header_css = inject_header_footer(&mut html, header.as_deref(), footer.as_deref());
 
     // 2. Process LaTeX math
     let math_fonts: Vec<PathBuf> = if cli.math || cli.math_dir.is_some() {
@@ -642,35 +663,38 @@ fn main() -> Result<()> {
     let engine = builder.build();
     let pdf = engine.render_html(&html)?;
 
-    // 5. Route output by format
-    let to_stdout = cli.output.as_os_str() == "-";
-    match cli.format.as_str() {
-        "svg" => {
-            let svg = render_svg_from_pdf(&pdf)?;
-            if to_stdout {
-                print!("{svg}");
-            } else {
-                std::fs::write(&cli.output, &svg)?;
-                eprintln!("SVG written to {}", cli.output.display());
-            }
+    // 5. Route output by format. YAML config triggers multi-format.
+    let to_stdout = cli.output.as_ref().map_or(false, |o| o.as_os_str() == "-");
+
+    // Config-driven multi-format output (from YAML output section)
+    if let Some(ref oc) = cfg.as_ref().and_then(|c| c.output.as_ref()) {
+        if let Some(ref path) = oc.pdf { std::fs::write(path, &pdf)?; eprintln!("PDF written to {}", path.display()); }
+        if let Some(ref path) = oc.svg { std::fs::write(path, render_svg_from_pdf(&pdf)?)?; eprintln!("SVG written to {}", path.display()); }
+        if let Some(ref path) = oc.png { std::fs::write(path, render_png_from_pdf(&pdf, cli.scale)?)?; eprintln!("PNG written to {}", path.display()); }
+    }
+
+    // CLI-driven output (--format + -o)
+    if to_stdout {
+        match cli.format.as_str() {
+            "svg" => print!("{}", render_svg_from_pdf(&pdf)?),
+            "png" => { use std::io::Write; std::io::stdout().write_all(&render_png_from_pdf(&pdf, cli.scale)?)?; }
+            _ => { use std::io::Write; std::io::stdout().write_all(&pdf)?; }
         }
-        "png" => {
-            let png = render_png_from_pdf(&pdf, cli.scale)?;
-            if to_stdout {
-                use std::io::Write;
-                std::io::stdout().write_all(&png)?;
-            } else {
-                std::fs::write(&cli.output, &png)?;
-                eprintln!("PNG written to {}", cli.output.display());
-            }
-        }
-        _ => {
-            if to_stdout {
-                use std::io::Write;
-                std::io::stdout().write_all(&pdf)?;
-            } else {
-                std::fs::write(&cli.output, &pdf)?;
-                eprintln!("PDF written to {}", cli.output.display());
+    } else if cfg.as_ref().and_then(|c| c.output.as_ref()).is_none() {
+        if let Some(ref output) = cli.output {
+            match cli.format.as_str() {
+                "svg" => {
+                    std::fs::write(output, render_svg_from_pdf(&pdf)?)?;
+                    eprintln!("SVG written to {}", output.display());
+                }
+                "png" => {
+                    std::fs::write(output, render_png_from_pdf(&pdf, cli.scale)?)?;
+                    eprintln!("PNG written to {}", output.display());
+                }
+                _ => {
+                    std::fs::write(output, &pdf)?;
+                    eprintln!("PDF written to {}", output.display());
+                }
             }
         }
     }
