@@ -1,0 +1,23 @@
+[package]
+name = "typepress"
+version = "0.1.0"
+edition = "2024"
+description = "Pure Rust HTML/CSS → PDF engine. No browser required."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/alitrack/typepress"
+
+[dependencies]
+# Core engine: fulgur provides HTML→PDF pipeline (Blitz→Taffy→Krilla)
+fulgur = "0.18"
+# CLI
+clap = { version = "4", features = ["derive"] }
+# LaTeX math rendering (pure Rust KaTeX)
+katex = { package = "katex-rs", version = "0.2" }
+# Regex for math detection
+regex = "1"
+mermaid-rs = { path = "../mermaid-rs" }
+# Error handling
+anyhow = "1"
+# Logging
+log = "0.4"
+env_logger = "0.11"
