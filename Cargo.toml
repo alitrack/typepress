@@ -28,6 +28,8 @@ tempfile = "3"
 # Config
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
+# PDF parsing for SVG Unicode text extraction (ToUnicode CMap)
+lopdf = "0.34"
 # Logging
 log = "0.4"
 env_logger = "0.11"

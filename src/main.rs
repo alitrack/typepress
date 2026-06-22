@@ -15,6 +15,7 @@ use regex::Regex;
 use std::path::{Path, PathBuf};
 
 mod config;
+mod svg;
 use config::TypePressConfig;
 
 // ── CLI ────────────────────────────────────────────────────────────────
@@ -155,11 +156,13 @@ fn parse_margin(s: &str) -> Margin {
 // ── Markdown Processing ────────────────────────────────────────────────
 
 fn process_markdown(input: &str) -> String {
-    use pulldown_cmark::{html, Parser};
+    use pulldown_cmark::{Parser, html};
     let parser = Parser::new(input);
     let mut html_output = String::new();
     html::push_html(&mut html_output, parser);
-    format!("<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"></head><body>\n{html_output}\n</body></html>")
+    format!(
+        "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"></head><body>\n{html_output}\n</body></html>"
+    )
 }
 
 // ── Math Processing ────────────────────────────────────────────────────
@@ -254,9 +257,15 @@ fn process_mermaid(html: &mut String) -> Result<usize> {
     let mut count = 0usize;
 
     // Collect all matches first (avoid borrow issues with mutable html)
-    let matches: Vec<_> = re.captures_iter(html).map(|c| {
-        (c.get(0).unwrap().range(), c.get(1).unwrap().as_str().to_string())
-    }).collect();
+    let matches: Vec<_> = re
+        .captures_iter(html)
+        .map(|c| {
+            (
+                c.get(0).unwrap().range(),
+                c.get(1).unwrap().as_str().to_string(),
+            )
+        })
+        .collect();
 
     // Process in reverse order to preserve positions
     for (range, source) in matches.into_iter().rev() {
@@ -436,7 +445,6 @@ fn read_input(input: Option<&PathBuf>, stdin: bool) -> Result<String> {
 // ── Multi-Format Output ────────────────────────────────────────────────
 
 fn render_png_from_pdf(pdf_bytes: &[u8], scale: f32) -> Result<Vec<u8>> {
-    
     use tiny_skia::Pixmap;
 
     let tmp = tempfile::NamedTempFile::new()?;
@@ -473,36 +481,7 @@ fn render_png_from_pdf(pdf_bytes: &[u8], scale: f32) -> Result<Vec<u8>> {
 }
 
 fn render_svg_from_pdf(pdf_bytes: &[u8]) -> Result<String> {
-    
-
-    let tmp = tempfile::NamedTempFile::new()?;
-    let path = tmp.path().to_path_buf();
-    std::fs::write(&path, pdf_bytes)?;
-    let result = fulgur::inspect::inspect(&path)?;
-
-    let w = 595.0; // A4
-    let h = 842.0;
-    let mut svg = format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">
-<rect width="{w}" height="{h}" fill="white"/>
-"#
-    );
-
-    for item in &result.text_items {
-        let escaped = item.text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
-        svg.push_str(&format!(
-            r#"<text x="{x}" y="{y}" font-family="{font}" font-size="{size}" fill="black">{text}</text>
-"#,
-            x = item.x,
-            y = item.y + item.font_size * 0.8,
-            font = item.font,
-            size = item.font_size,
-            text = escaped,
-        ));
-    }
-    svg.push_str("</svg>\n");
-    Ok(svg)
+    svg::svg_unicode(pdf_bytes, 1)
 }
 
 // ── Main ───────────────────────────────────────────────────────────────
@@ -518,12 +497,24 @@ fn main() -> Result<()> {
     };
 
     // Merge: CLI args override YAML values.
-    let input_file = cli.input.clone().or_else(|| cfg.as_ref().and_then(|c| c.input.clone()));
+    let input_file = cli
+        .input
+        .clone()
+        .or_else(|| cfg.as_ref().and_then(|c| c.input.clone()));
     let is_md = cli.from == "md"
-        || input_file.as_ref().and_then(|p| p.extension()).map_or(false, |e| e == "md")
+        || input_file
+            .as_ref()
+            .and_then(|p| p.extension())
+            .map_or(false, |e| e == "md")
         || cfg.as_ref().and_then(|c| c.from.as_deref()) == Some("md");
-    let header = cli.header.clone().or_else(|| cfg.as_ref().and_then(|c| c.header.clone()));
-    let footer = cli.footer.clone().or_else(|| cfg.as_ref().and_then(|c| c.footer.clone()));
+    let header = cli
+        .header
+        .clone()
+        .or_else(|| cfg.as_ref().and_then(|c| c.header.clone()));
+    let footer = cli
+        .footer
+        .clone()
+        .or_else(|| cfg.as_ref().and_then(|c| c.footer.clone()));
 
     let base_path = if cli.stdin {
         std::env::current_dir().ok()
@@ -540,6 +531,48 @@ fn main() -> Result<()> {
                 .or_else(|| std::env::current_dir().ok())
         })
     };
+
+    // ── PDF passthrough: if input is already a PDF, just convert format ──
+    let is_pdf_input = input_file
+        .as_ref()
+        .and_then(|p| p.extension())
+        .map_or(false, |e| e == "pdf");
+    if is_pdf_input && !cli.stdin {
+        let pdf_bytes = std::fs::read(input_file.as_ref().unwrap())?;
+        let to_stdout = cli
+            .output
+            .as_ref()
+            .map_or(false, |o| o.as_os_str() == "-");
+        if to_stdout {
+            match cli.format.as_str() {
+                "svg" => print!("{}", render_svg_from_pdf(&pdf_bytes)?),
+                "png" => {
+                    use std::io::Write;
+                    std::io::stdout().write_all(&render_png_from_pdf(&pdf_bytes, cli.scale)?)?;
+                }
+                _ => {
+                    use std::io::Write;
+                    std::io::stdout().write_all(&pdf_bytes)?;
+                }
+            }
+        } else if let Some(ref output) = cli.output {
+            match cli.format.as_str() {
+                "svg" => {
+                    std::fs::write(output, render_svg_from_pdf(&pdf_bytes)?)?;
+                    eprintln!("SVG written to {}", output.display());
+                }
+                "png" => {
+                    std::fs::write(output, render_png_from_pdf(&pdf_bytes, cli.scale)?)?;
+                    eprintln!("PNG written to {}", output.display());
+                }
+                _ => {
+                    std::fs::write(output, &pdf_bytes)?;
+                    eprintln!("PDF written to {}", output.display());
+                }
+            }
+        }
+        return Ok(());
+    }
 
     let mut html = read_input(input_file.as_ref(), cli.stdin)?;
 
@@ -668,17 +701,32 @@ fn main() -> Result<()> {
 
     // Config-driven multi-format output (from YAML output section)
     if let Some(ref oc) = cfg.as_ref().and_then(|c| c.output.as_ref()) {
-        if let Some(ref path) = oc.pdf { std::fs::write(path, &pdf)?; eprintln!("PDF written to {}", path.display()); }
-        if let Some(ref path) = oc.svg { std::fs::write(path, render_svg_from_pdf(&pdf)?)?; eprintln!("SVG written to {}", path.display()); }
-        if let Some(ref path) = oc.png { std::fs::write(path, render_png_from_pdf(&pdf, cli.scale)?)?; eprintln!("PNG written to {}", path.display()); }
+        if let Some(ref path) = oc.pdf {
+            std::fs::write(path, &pdf)?;
+            eprintln!("PDF written to {}", path.display());
+        }
+        if let Some(ref path) = oc.svg {
+            std::fs::write(path, render_svg_from_pdf(&pdf)?)?;
+            eprintln!("SVG written to {}", path.display());
+        }
+        if let Some(ref path) = oc.png {
+            std::fs::write(path, render_png_from_pdf(&pdf, cli.scale)?)?;
+            eprintln!("PNG written to {}", path.display());
+        }
     }
 
     // CLI-driven output (--format + -o)
     if to_stdout {
         match cli.format.as_str() {
             "svg" => print!("{}", render_svg_from_pdf(&pdf)?),
-            "png" => { use std::io::Write; std::io::stdout().write_all(&render_png_from_pdf(&pdf, cli.scale)?)?; }
-            _ => { use std::io::Write; std::io::stdout().write_all(&pdf)?; }
+            "png" => {
+                use std::io::Write;
+                std::io::stdout().write_all(&render_png_from_pdf(&pdf, cli.scale)?)?;
+            }
+            _ => {
+                use std::io::Write;
+                std::io::stdout().write_all(&pdf)?;
+            }
         }
     } else if cfg.as_ref().and_then(|c| c.output.as_ref()).is_none() {
         if let Some(ref output) = cli.output {

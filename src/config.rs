@@ -106,11 +106,16 @@ pub struct MathConfig {
     pub font_dir: Option<PathBuf>,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 impl Default for MathConfig {
     fn default() -> Self {
-        Self { enabled: true, font_dir: None }
+        Self {
+            enabled: true,
+            font_dir: None,
+        }
     }
 }
 
