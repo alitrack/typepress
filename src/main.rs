@@ -19,6 +19,7 @@ mod svg;
 mod fonts;
 mod highlight;
 use config::TypePressConfig;
+use typepress::{markdown_to_html, inject_header_footer};
 
 // ── CLI ────────────────────────────────────────────────────────────────
 
@@ -157,33 +158,9 @@ fn parse_margin(s: &str) -> Margin {
 
 // ── Markdown Processing ────────────────────────────────────────────────
 
-fn process_markdown(input: &str) -> String {
-    use pulldown_cmark::{html, Options, Parser};
-    let options = Options::all();
-    let parser = Parser::new_ext(input, options);
-    let mut html_output = String::new();
-    html::push_html(&mut html_output, parser);
-    // Fix self-closing tags that Blitz/fulgur doesn't understand
-    let html_output = html_output.replace(" />", ">");
-    format!(
-        "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><style>{DEFAULT_PRINT_CSS}</style></head><body>\n{html_output}\n</body></html>"
-    )
-}
+
 
 /// Default CSS for print/document styling injected into Markdown output.
-const DEFAULT_PRINT_CSS: &str = r#"
-    table { border-collapse: collapse; width: 100%; }
-    th { background: #eee; font-weight: bold; }
-    td, th { border: 1px solid #999; padding: 4pt 8pt; text-align: left; }
-    pre { background: #f5f5f5; border: 1px solid #ddd; padding: 8pt; font-family: monospace; font-size: 9pt; }
-    pre code { background: none; padding: 0; }
-    code { background: #f0f0f0; padding: 1pt 3pt; }
-    blockquote { border-left: 3px solid #ccc; margin: 10pt 0; padding: 4pt 12pt; color: #555; }
-    tr { break-inside: avoid; page-break-inside: avoid; }
-    thead { display: table-header-group; }
-    h2, h3 { break-after: avoid; page-break-after: avoid; }
-"#;
-
 // ── Math Processing ────────────────────────────────────────────────────
 
 const ESCAPED_PLACEHOLDER: &str = "\x00TXP_ESC_DOLLAR\x00";
@@ -218,7 +195,7 @@ fn process_math(html: &mut String) -> Result<usize> {
 
     *html = html.replace("\\$", ESCAPED_PLACEHOLDER);
 
-    let display_re = Regex::new(r"\$\$(.+?)\$\$")?;
+    let display_re = Regex::new(r"(?s)\$\$(.+?)\$\$")?;
     let inline_re = Regex::new(r"\$([^$]+?)\$")?;
 
     let ctx = KatexContext::default();
@@ -228,11 +205,15 @@ fn process_math(html: &mut String) -> Result<usize> {
     let mathml_re = Regex::new(r#"<span class="katex-mathml">.*?</span>"#)?;
 
     // Display math $$...$$
-    while let Some(caps) = display_re.captures(html) {
-        let latex = caps.get(1).unwrap().as_str().trim();
+    // Collect all matches first to avoid re-scanning KaTeX output (recursion defense)
+    let display_matches: Vec<_> = display_re
+        .captures_iter(html)
+        .map(|c| (c.get(0).unwrap().range(), c.get(1).unwrap().as_str().to_string()))
+        .collect();
+    for (range, latex) in display_matches.into_iter().rev() {
         let mut rendered = render_to_string(
             &ctx,
-            latex,
+            &latex,
             &Settings {
                 display_mode: true,
                 ..Default::default()
@@ -241,7 +222,6 @@ fn process_math(html: &mut String) -> Result<usize> {
         .map_err(|e| anyhow::anyhow!("katex error in display math: {e:?}"))?;
         // Strip MathML to avoid raw LaTeX text appearing in PDF
         rendered = mathml_re.replace(&rendered, "").to_string();
-        let range = caps.get(0).unwrap().range();
         html.replace_range(
             range,
             &format!("<span class=\"katex-display\">{rendered}</span>"),
@@ -250,13 +230,16 @@ fn process_math(html: &mut String) -> Result<usize> {
     }
 
     // Inline math $...$
-    while let Some(caps) = inline_re.captures(html) {
-        let latex = caps.get(1).unwrap().as_str().trim();
-        let mut rendered = render_to_string(&ctx, latex, &Settings::default())
+    // Collect all matches first (same recursion defense as display math)
+    let inline_matches: Vec<_> = inline_re
+        .captures_iter(html)
+        .map(|c| (c.get(0).unwrap().range(), c.get(1).unwrap().as_str().to_string()))
+        .collect();
+    for (range, latex) in inline_matches.into_iter().rev() {
+        let mut rendered = render_to_string(&ctx, &latex, &Settings::default())
             .map_err(|e| anyhow::anyhow!("katex error in inline math: {e:?}"))?;
         // Strip MathML
         rendered = mathml_re.replace(&rendered, "").to_string();
-        let range = caps.get(0).unwrap().range();
         html.replace_range(
             range,
             &format!("<span class=\"katex-inline\">{rendered}</span>"),
@@ -279,7 +262,7 @@ fn process_math(html: &mut String) -> Result<usize> {
 fn process_mermaid(html: &mut String, output_dir: Option<&Path>) -> Result<usize> {
     use mermaid_rs::{EstimatedMeasure, render_diagram};
 
-    let re = Regex::new(r"(?s)```mermaid\n(.*?)```")?;
+    let re = Regex::new(r"(?s)```mermaid\r?\n(.*?)```")?;
     let mut count = 0usize;
 
     // Collect all matches first (avoid borrow issues with mutable html)
@@ -306,7 +289,9 @@ fn process_mermaid(html: &mut String, output_dir: Option<&Path>) -> Result<usize
                 };
                 if let Some(dir) = output_dir {
                     let svg_path = dir.join(&svg_name);
-                    let _ = std::fs::write(&svg_path, &svg);
+                    if let Err(e) = std::fs::write(&svg_path, &svg) {
+                        eprintln!("Warning: failed to write mermaid SVG to {}: {e}", svg_path.display());
+                    }
                 }
                 // Placeholder in PDF — blitz-html can't render inline SVG
                 let wrapped = format!(
@@ -396,65 +381,6 @@ fn find_katex_fonts_in(dir: &Path, depth: usize, max: usize) -> Option<PathBuf> 
 
 // ── Header / Footer ────────────────────────────────────────────────────
 
-fn inject_header_footer(
-    html: &mut String,
-    header: Option<&str>,
-    footer: Option<&str>,
-) -> Option<String> {
-    if header.is_none() && footer.is_none() {
-        return None;
-    }
-
-    let mut page_css = String::new();
-    let mut body_prefix = String::new();
-    let mut body_suffix = String::new();
-
-    if let Some(h) = header {
-        let escaped = h
-            .replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;");
-        body_prefix.push_str(&format!(
-            "<div style=\"position:running(typepress-hdr)\">{escaped}</div>\n"
-        ));
-        page_css.push_str(
-            "@top-center { content: element(typepress-hdr); font-size: 9pt; color: #555; }\n",
-        );
-    }
-    if let Some(f) = footer {
-        let escaped = f
-            .replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;");
-        body_suffix.push_str(&format!(
-            "<div style=\"position:running(typepress-ftr)\">{escaped}</div>\n"
-        ));
-        page_css.push_str(
-            "@bottom-center { content: element(typepress-ftr); font-size: 8pt; color: #888; }\n",
-        );
-    }
-
-    let css = format!("@page {{ {page_css} }}");
-
-    if let Some(pos) = html.find("</head>") {
-        html.insert_str(pos, &format!("<style>{css}</style>"));
-    } else if let Some(pos) = html.find("<body") {
-        html.insert_str(pos, &format!("<style>{css}</style>\n"));
-    }
-
-    if let Some(pos) = html.find("<body") {
-        let body_end = html[pos..]
-            .find('>')
-            .map(|p| pos + p + 1)
-            .unwrap_or(pos + 5);
-        html.insert_str(body_end, &format!("\n{body_prefix}"));
-    }
-    if let Some(pos) = html.rfind("</body>") {
-        html.insert_str(pos, &body_suffix);
-    }
-
-    Some(css)
-}
 
 // ── Utility ────────────────────────────────────────────────────────────
 
@@ -489,9 +415,24 @@ fn render_png_from_pdf(pdf_bytes: &[u8], scale: f32) -> Result<Vec<u8>> {
     std::fs::write(&path, pdf_bytes)?;
     let result = fulgur::inspect::inspect(&path)?;
 
+    // Read actual page dimensions from PDF MediaBox (not hardcoded A4)
+    let (w_pt, h_pt) = lopdf::Document::load(&path)
+        .ok()
+        .and_then(|doc| {
+            let pages = doc.get_pages();
+            let first_page_id = pages.values().next().copied()?;
+            let dict = doc.get_dictionary(first_page_id).ok()?;
+            let media_box = dict.get(b"MediaBox").ok()?;
+            let arr = media_box.as_array().ok()?;
+            let w = arr.get(2).and_then(|o| o.as_f32().ok()).unwrap_or(595.0);
+            let h = arr.get(3).and_then(|o| o.as_f32().ok()).unwrap_or(842.0);
+            Some((w, h))
+        })
+        .unwrap_or((595.0, 842.0));
+    let w = w_pt * scale;
+    let h = h_pt * scale;
+
     let first_page = result.text_items.iter().filter(|t| t.page == 1);
-    let w = 595.0 * scale; // A4 width in points
-    let h = 842.0 * scale;
 
     let mut pixmap = Pixmap::new(w as u32, h as u32)
         .ok_or_else(|| anyhow::anyhow!("failed to create pixmap {w}x{h}"))?;
@@ -560,7 +501,9 @@ fn main() -> Result<()> {
 
     // Load config: --config <file> or auto-detect typepress.yaml
     let cfg = if let Some(ref path) = cli.config {
-        TypePressConfig::from_file(path).ok()
+        TypePressConfig::from_file(path)
+            .map_err(|e| eprintln!("Warning: failed to load config {}: {e}", path.display()))
+            .ok()
     } else {
         TypePressConfig::auto_detect().map(|(c, _)| c)
     };
@@ -687,7 +630,7 @@ fn main() -> Result<()> {
         }
 
         // 0c. Convert markdown to HTML
-        html = process_markdown(&html);
+        html = markdown_to_html(&html);
 
         // 1. Inject header/footer
         header_css = inject_header_footer(&mut html, header.as_deref(), footer.as_deref());
@@ -786,6 +729,61 @@ fn main() -> Result<()> {
 
     // 4. Build engine
     let mut builder = Engine::builder();
+
+    // ── Merge YAML config (CLI args override YAML) ──
+    if let Some(ref c) = cfg {
+        if let Some(ref pc) = c.page {
+            if cli.size.is_none() {
+                if let Some(ref size) = pc.size {
+                    builder = builder.page_size(parse_page_size(size));
+                }
+            }
+            if !cli.landscape {
+                if let Some(ls) = pc.landscape {
+                    builder = builder.landscape(ls);
+                }
+            }
+            if cli.margin.is_none() {
+                if let Some(ref margin) = pc.margin {
+                    builder = builder.margin(parse_margin(margin));
+                }
+            }
+        }
+        if let Some(ref mc) = c.metadata {
+            if cli.title.is_none() {
+                if let Some(ref title) = mc.title {
+                    builder = builder.title(title.clone());
+                }
+            }
+            if cli.authors.is_empty() && !mc.author.is_empty() {
+                builder = builder.authors(mc.author.clone());
+            }
+            if cli.language.is_none() {
+                if let Some(ref lang) = mc.language {
+                    builder = builder.lang(lang.clone());
+                }
+            }
+        }
+        if let Some(ref pdf_cfg) = c.pdf {
+            if !cli.bookmarks {
+                if let Some(bm) = pdf_cfg.bookmarks {
+                    builder = builder.bookmarks(bm);
+                }
+            }
+            if !cli.tagged {
+                if let Some(tg) = pdf_cfg.tagged {
+                    builder = builder.tagged(tg);
+                }
+            }
+            if !cli.pdf_ua {
+                if let Some(ua) = pdf_cfg.pdf_ua {
+                    builder = builder.pdf_ua(ua);
+                }
+            }
+        }
+    }
+
+    // ── CLI args (override YAML or set directly) ──
     if let Some(ref s) = cli.size {
         builder = builder.page_size(parse_page_size(s));
     }
