@@ -157,10 +157,12 @@ fn parse_margin(s: &str) -> Margin {
 // ── Markdown Processing ────────────────────────────────────────────────
 
 fn process_markdown(input: &str) -> String {
-    use pulldown_cmark::{Parser, html};
+    use pulldown_cmark::{html, Parser};
     let parser = Parser::new(input);
     let mut html_output = String::new();
     html::push_html(&mut html_output, parser);
+    // Fix self-closing tags that Blitz/fulgur doesn't understand
+    let html_output = html_output.replace(" />", ">");
     format!(
         "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"></head><body>\n{html_output}\n</body></html>"
     )

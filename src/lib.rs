@@ -17,15 +17,15 @@ pub fn render_markdown_to_pdf(
     footer: Option<&str>,
 ) -> Result<()> {
     use fulgur::asset::AssetBundle;
-    use fulgur::config::Margin;
     use fulgur::engine::Engine;
 
     // Convert Markdown to HTML
     let mut html = {
-        use pulldown_cmark::{Parser, html};
+        use pulldown_cmark::{html, Parser};
         let parser = Parser::new(markdown);
         let mut out = String::new();
         html::push_html(&mut out, parser);
+        let out = out.replace(" />", ">");
         format!(
             "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"></head><body>\n{out}\n</body></html>"
         )
