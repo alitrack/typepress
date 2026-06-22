@@ -35,6 +35,15 @@ struct Cli {
     #[arg(long = "from", default_value = "html")]
     from: String,
 
+    // ── Output format ──
+    /// Output format: pdf (default), svg, or png
+    #[arg(long = "format", short = 'F', default_value = "pdf")]
+    format: String,
+
+    /// Scale factor for PNG output (default: 2.0 for retina)
+    #[arg(long, default_value = "2.0")]
+    scale: f32,
+
     // ── Page ──
     /// Page size: A4, Letter, A3, etc.
     #[arg(short, long)]
@@ -416,6 +425,78 @@ fn read_input(input: Option<&PathBuf>, stdin: bool) -> Result<String> {
     }
 }
 
+// ── Multi-Format Output ────────────────────────────────────────────────
+
+fn render_png_from_pdf(pdf_bytes: &[u8], scale: f32) -> Result<Vec<u8>> {
+    
+    use tiny_skia::Pixmap;
+
+    let tmp = tempfile::NamedTempFile::new()?;
+    let path = tmp.path().to_path_buf();
+    std::fs::write(&path, pdf_bytes)?;
+    let result = fulgur::inspect::inspect(&path)?;
+
+    let first_page = result.text_items.iter().filter(|t| t.page == 1);
+    let w = 595.0 * scale; // A4 width in points
+    let h = 842.0 * scale;
+
+    let mut pixmap = Pixmap::new(w as u32, h as u32)
+        .ok_or_else(|| anyhow::anyhow!("failed to create pixmap {w}x{h}"))?;
+    pixmap.fill(tiny_skia::Color::WHITE);
+
+    // Simple approach: draw text items as colored rectangles
+    // (Full text rendering would need font loading)
+    let paint = tiny_skia::Paint {
+        shader: tiny_skia::Shader::SolidColor(tiny_skia::Color::from_rgba8(0, 0, 0, 255)),
+        ..Default::default()
+    };
+    for item in first_page {
+        let rx = item.x * scale;
+        let ry = item.y * scale;
+        let rw = item.width.max(4.0) * scale;
+        let rh = item.height * scale;
+        let rect = tiny_skia::Rect::from_xywh(rx, ry, rw, rh)
+            .unwrap_or(tiny_skia::Rect::from_xywh(0.0, 0.0, 1.0, 1.0).unwrap());
+        pixmap.fill_rect(rect, &paint, tiny_skia::Transform::default(), None);
+    }
+
+    let png_data = pixmap.encode_png()?;
+    Ok(png_data)
+}
+
+fn render_svg_from_pdf(pdf_bytes: &[u8]) -> Result<String> {
+    
+
+    let tmp = tempfile::NamedTempFile::new()?;
+    let path = tmp.path().to_path_buf();
+    std::fs::write(&path, pdf_bytes)?;
+    let result = fulgur::inspect::inspect(&path)?;
+
+    let w = 595.0; // A4
+    let h = 842.0;
+    let mut svg = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">
+<rect width="{w}" height="{h}" fill="white"/>
+"#
+    );
+
+    for item in &result.text_items {
+        let escaped = item.text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+        svg.push_str(&format!(
+            r#"<text x="{x}" y="{y}" font-family="{font}" font-size="{size}" fill="black">{text}</text>
+"#,
+            x = item.x,
+            y = item.y + item.font_size * 0.8,
+            font = item.font,
+            size = item.font_size,
+            text = escaped,
+        ));
+    }
+    svg.push_str("</svg>\n");
+    Ok(svg)
+}
+
 // ── Main ───────────────────────────────────────────────────────────────
 
 fn main() -> Result<()> {
@@ -561,14 +642,37 @@ fn main() -> Result<()> {
     let engine = builder.build();
     let pdf = engine.render_html(&html)?;
 
-    // 5. Write output
+    // 5. Route output by format
     let to_stdout = cli.output.as_os_str() == "-";
-    if to_stdout {
-        use std::io::Write;
-        std::io::stdout().write_all(&pdf)?;
-    } else {
-        std::fs::write(&cli.output, &pdf)?;
-        eprintln!("PDF written to {}", cli.output.display());
+    match cli.format.as_str() {
+        "svg" => {
+            let svg = render_svg_from_pdf(&pdf)?;
+            if to_stdout {
+                print!("{svg}");
+            } else {
+                std::fs::write(&cli.output, &svg)?;
+                eprintln!("SVG written to {}", cli.output.display());
+            }
+        }
+        "png" => {
+            let png = render_png_from_pdf(&pdf, cli.scale)?;
+            if to_stdout {
+                use std::io::Write;
+                std::io::stdout().write_all(&png)?;
+            } else {
+                std::fs::write(&cli.output, &png)?;
+                eprintln!("PNG written to {}", cli.output.display());
+            }
+        }
+        _ => {
+            if to_stdout {
+                use std::io::Write;
+                std::io::stdout().write_all(&pdf)?;
+            } else {
+                std::fs::write(&cli.output, &pdf)?;
+                eprintln!("PDF written to {}", cli.output.display());
+            }
+        }
     }
 
     Ok(())

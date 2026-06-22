@@ -18,8 +18,13 @@ regex = "1"
 mermaid-rs = { path = "../mermaid-rs" }
 # Markdown input
 pulldown-cmark = "0.13"
+# Multi-format output (SVG/PNG)
+resvg = "0.45"
+tiny-skia = "0.11"
+usvg = "0.45"
 # Error handling
 anyhow = "1"
+tempfile = "3"
 # Logging
 log = "0.4"
 env_logger = "0.11"
