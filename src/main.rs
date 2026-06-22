@@ -200,8 +200,14 @@ fn process_math(html: &mut String) -> Result<usize> {
     let ctx = KatexContext::default();
     let count = &mut 0usize;
 
-    // Regex to strip MathML annotation (contains raw LaTeX that pollutes PDF output)
-    let mathml_re = Regex::new(r#"<span class="katex-mathml">.*?</span>"#)?;
+    // Regex to strip MathML annotation (contains raw LaTeX that pollutes PDF output).
+    // (?s) flag is CRITICAL — katex-rs outputs annotation on multiple lines.
+    let mathml_re = Regex::new(r#"(?s)<span class="katex-mathml">.*?</span>"#)?;
+
+    // Regex to extract plain text from KaTeX HTML (strips CSS spans, keeps raw Unicode).
+    // Krilla's CSS engine can't handle KaTeX's positioning model (dozens of nested spans),
+    // so we render math as Unicode text with the surrounding math formatting class.
+    let strip_tags_re = Regex::new(r"<[^>]+>")?;
 
     // Display math $$...$$
     // Collect all matches first to avoid re-scanning KaTeX output (recursion defense)
@@ -221,9 +227,12 @@ fn process_math(html: &mut String) -> Result<usize> {
         .map_err(|e| anyhow::anyhow!("katex error in display math: {e:?}"))?;
         // Strip MathML to avoid raw LaTeX text appearing in PDF
         rendered = mathml_re.replace(&rendered, "").to_string();
+        // Strip all KaTeX span tags — keep only Unicode text content.
+        // Krilla's CSS engine can't handle KaTeX's dozen-layer positioning model.
+        let plain = strip_tags_re.replace_all(&rendered, "").to_string();
         html.replace_range(
             range,
-            &format!("<span class=\"katex-display\">{rendered}</span>"),
+            &format!("<span class=\"katex-display\">{plain}</span>"),
         );
         *count += 1;
     }
@@ -239,19 +248,19 @@ fn process_math(html: &mut String) -> Result<usize> {
             .map_err(|e| anyhow::anyhow!("katex error in inline math: {e:?}"))?;
         // Strip MathML
         rendered = mathml_re.replace(&rendered, "").to_string();
+        // Strip all KaTeX span tags — keep only Unicode text content
+        let plain = strip_tags_re.replace_all(&rendered, "").to_string();
         html.replace_range(
             range,
-            &format!("<span class=\"katex-inline\">{rendered}</span>"),
+            &format!("<span class=\"katex-inline\">{plain}</span>"),
         );
         *count += 1;
     }
 
     *html = html.replace(ESCAPED_PLACEHOLDER, "\\$");
 
-    // Inject KaTeX CSS
-    if *count > 0 {
-        inject_css(html, KATEX_CSS);
-    }
+    // KaTeX CSS is injected after markdown_to_html (see main pipeline)
+    // because inject_css requires </head> which only exists after HTML wrapping.
 
     Ok(*count)
 }
@@ -626,16 +635,30 @@ fn main() -> Result<()> {
         }
 
         // 0b. Math (raw markdown — pre-empts pulldown-cmark's ENABLE_MATH)
-        if math_enabled {
+        let math_count = if math_enabled {
             match process_math(&mut html) {
-                Ok(n) if n > 0 => eprintln!("Rendered {n} math expression(s)"),
-                Err(e) => eprintln!("Warning: math processing failed: {e}"),
-                _ => {}
+                Ok(n) => {
+                    if n > 0 {
+                        eprintln!("Rendered {n} math expression(s)");
+                    }
+                    n
+                }
+                Err(e) => {
+                    eprintln!("Warning: math processing failed: {e}");
+                    0
+                }
             }
-        }
+        } else {
+            0
+        };
 
         // 0c. Convert markdown to HTML
         html = markdown_to_html(&html);
+
+        // Inject KaTeX CSS after HTML wrapping (needs </head> tag)
+        if math_enabled && math_count > 0 {
+            inject_css(&mut html, KATEX_CSS);
+        }
 
         // 1. Inject header/footer
         header_css = inject_header_footer(&mut html, header.as_deref(), footer.as_deref());
