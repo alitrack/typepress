@@ -1,8 +1,8 @@
 [package]
 name = "typepress"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2024"
-description = "Pure Rust HTML/CSS → PDF engine. No browser required."
+description = "Pure Rust HTML/CSS → PDF/SVG/PNG engine. No browser required."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/alitrack/typepress"
 
@@ -27,9 +27,9 @@ anyhow = "1"
 tempfile = "3"
 # Config
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
+noyalib = "0.0"
 # PDF parsing for SVG Unicode text extraction (ToUnicode CMap)
-lopdf = "0.34"
+lopdf = "0.40"
 # HTTP for @font-face web font downloading
 reqwest = { version = "0.12", features = ["blocking"] }
 # Code syntax highlighting
