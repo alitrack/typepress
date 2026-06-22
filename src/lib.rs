@@ -7,6 +7,20 @@ pub mod svg;
 use anyhow::Result;
 use std::path::Path;
 
+/// Default CSS for print/document styling injected into Markdown output.
+const DEFAULT_PRINT_CSS: &str = r#"
+    table { border-collapse: collapse; width: 100%; }
+    th { background: #eee; font-weight: bold; }
+    td, th { border: 1px solid #999; padding: 4pt 8pt; text-align: left; }
+    pre { background: #f5f5f5; border: 1px solid #ddd; padding: 8pt; font-family: monospace; font-size: 9pt; }
+    pre code { background: none; padding: 0; }
+    code { background: #f0f0f0; padding: 1pt 3pt; }
+    blockquote { border-left: 3px solid #ccc; margin: 10pt 0; padding: 4pt 12pt; color: #555; }
+    tr { break-inside: avoid; page-break-inside: avoid; }
+    thead { display: table-header-group; }
+    h2, h3 { break-after: avoid; page-break-after: avoid; }
+"#;
+
 /// Render markdown to PDF. This is the core library entry point.
 pub fn render_markdown_to_pdf(
     markdown: &str,
@@ -19,15 +33,16 @@ pub fn render_markdown_to_pdf(
     use fulgur::asset::AssetBundle;
     use fulgur::engine::Engine;
 
-    // Convert Markdown to HTML
+    // Convert Markdown to HTML with GFM extensions (tables, strikethrough, etc.)
     let mut html = {
-        use pulldown_cmark::{html, Parser};
-        let parser = Parser::new(markdown);
+        use pulldown_cmark::{html, Options, Parser};
+        let options = Options::all();
+        let parser = Parser::new_ext(markdown, options);
         let mut out = String::new();
         html::push_html(&mut out, parser);
         let out = out.replace(" />", ">");
         format!(
-            "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"></head><body>\n{out}\n</body></html>"
+            "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><style>{DEFAULT_PRINT_CSS}</style></head><body>\n{out}\n</body></html>"
         )
     };
 
@@ -67,7 +82,11 @@ pub fn render_markdown_to_pdf(
     Ok(())
 }
 
-fn inject_hf(html: &mut String, header: Option<&str>, footer: Option<&str>) -> Option<String> {
+fn inject_hf(
+    html: &mut String,
+    header: Option<&str>,
+    footer: Option<&str>,
+) -> Option<String> {
     if header.is_none() && footer.is_none() {
         return None;
     }
@@ -78,13 +97,17 @@ fn inject_hf(html: &mut String, header: Option<&str>, footer: Option<&str>) -> O
             .replace('&', "&amp;")
             .replace('<', "&lt;")
             .replace('>', "&gt;");
-        let prefix = format!("<div style=\"position:running(typepress-hdr)\">{escaped}</div>\n");
+        let prefix = format!(
+            "<div style=\"position:running(typepress-hdr)\">{escaped}</div>\n"
+        );
         page_css.push_str(
             "@top-center { content: element(typepress-hdr); font-size: 9pt; color: #555; }\n",
         );
-        // Insert before </head> or after <body>
         if let Some(pos) = html.find("</head>") {
-            html.insert_str(pos, &format!("<style>@page {{ {page_css} }}</style>"));
+            html.insert_str(
+                pos,
+                &format!("<style>@page {{ {page_css} }}</style>"),
+            );
         }
         if let Some(pos) = html.find("<body") {
             let body_end = html[pos..]
@@ -103,7 +126,9 @@ fn inject_hf(html: &mut String, header: Option<&str>, footer: Option<&str>) -> O
         if let Some(pos) = html.rfind("</body>") {
             html.insert_str(
                 pos,
-                &format!("<div style=\"position:running(typepress-ftr)\">{escaped}</div>\n"),
+                &format!(
+                    "<div style=\"position:running(typepress-ftr)\">{escaped}</div>\n"
+                ),
             );
         }
     }

@@ -15,8 +15,9 @@ use regex::Regex;
 use std::path::{Path, PathBuf};
 
 mod config;
-mod fonts;
 mod svg;
+mod fonts;
+mod highlight;
 use config::TypePressConfig;
 
 // ── CLI ────────────────────────────────────────────────────────────────
@@ -157,16 +158,31 @@ fn parse_margin(s: &str) -> Margin {
 // ── Markdown Processing ────────────────────────────────────────────────
 
 fn process_markdown(input: &str) -> String {
-    use pulldown_cmark::{html, Parser};
-    let parser = Parser::new(input);
+    use pulldown_cmark::{html, Options, Parser};
+    let options = Options::all();
+    let parser = Parser::new_ext(input, options);
     let mut html_output = String::new();
     html::push_html(&mut html_output, parser);
     // Fix self-closing tags that Blitz/fulgur doesn't understand
     let html_output = html_output.replace(" />", ">");
     format!(
-        "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"></head><body>\n{html_output}\n</body></html>"
+        "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><style>{DEFAULT_PRINT_CSS}</style></head><body>\n{html_output}\n</body></html>"
     )
 }
+
+/// Default CSS for print/document styling injected into Markdown output.
+const DEFAULT_PRINT_CSS: &str = r#"
+    table { border-collapse: collapse; width: 100%; }
+    th { background: #eee; font-weight: bold; }
+    td, th { border: 1px solid #999; padding: 4pt 8pt; text-align: left; }
+    pre { background: #f5f5f5; border: 1px solid #ddd; padding: 8pt; font-family: monospace; font-size: 9pt; }
+    pre code { background: none; padding: 0; }
+    code { background: #f0f0f0; padding: 1pt 3pt; }
+    blockquote { border-left: 3px solid #ccc; margin: 10pt 0; padding: 4pt 12pt; color: #555; }
+    tr { break-inside: avoid; page-break-inside: avoid; }
+    thead { display: table-header-group; }
+    h2, h3 { break-after: avoid; page-break-after: avoid; }
+"#;
 
 // ── Math Processing ────────────────────────────────────────────────────
 
@@ -658,6 +674,13 @@ fn main() -> Result<()> {
             Err(e) => eprintln!("Warning: mermaid processing failed: {e}"),
             _ => {}
         }
+    }
+
+    // 2c. Apply code syntax highlighting (syntect)
+    match highlight::highlight_code_blocks(&mut html) {
+        Ok(n) if n > 0 => eprintln!("Highlighted {n} code block(s)"),
+        Err(e) => eprintln!("Warning: code highlighting failed: {e}"),
+        _ => {}
     }
 
     // 3. Build asset bundle — start with @font-face font resolution
