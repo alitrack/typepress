@@ -485,6 +485,38 @@ fn render_svg_from_pdf(pdf_bytes: &[u8]) -> Result<String> {
     svg::svg_unicode(pdf_bytes, 1)
 }
 
+/// Generate multi-page output filenames from a base path.
+/// e.g., "out.svg" → ["out_page1.svg", "out_page2.svg"]
+/// If only 1 page, returns just ["out.svg"].
+fn page_output_paths(base: &Path, page_count: u32) -> Vec<PathBuf> {
+    if page_count <= 1 {
+        return vec![base.to_path_buf()];
+    }
+    let stem = base.file_stem().unwrap_or_default().to_string_lossy();
+    let ext = base.extension().unwrap_or_default().to_string_lossy();
+    let parent = base.parent().unwrap_or(Path::new("."));
+    (1..=page_count)
+        .map(|p| {
+            if ext.is_empty() {
+                parent.join(format!("{stem}_page{p}"))
+            } else {
+                parent.join(format!("{stem}_page{p}.{ext}"))
+            }
+        })
+        .collect()
+}
+
+fn write_svg_multi(pdf_bytes: &[u8], output: &Path) -> Result<()> {
+    let pages = svg::page_count(pdf_bytes)?;
+    let paths = page_output_paths(output, pages);
+    for (i, path) in paths.iter().enumerate() {
+        let svg_content = svg::svg_unicode(pdf_bytes, (i + 1) as u32)?;
+        std::fs::write(path, svg_content)?;
+        eprintln!("SVG page {} written to {}", i + 1, path.display());
+    }
+    Ok(())
+}
+
 // ── Main ───────────────────────────────────────────────────────────────
 
 fn main() -> Result<()> {
@@ -555,10 +587,7 @@ fn main() -> Result<()> {
             }
         } else if let Some(ref output) = cli.output {
             match cli.format.as_str() {
-                "svg" => {
-                    std::fs::write(output, render_svg_from_pdf(&pdf_bytes)?)?;
-                    eprintln!("SVG written to {}", output.display());
-                }
+                "svg" => write_svg_multi(&pdf_bytes, output)?,
                 "png" => {
                     std::fs::write(output, render_png_from_pdf(&pdf_bytes, cli.scale)?)?;
                     eprintln!("PNG written to {}", output.display());
@@ -737,8 +766,7 @@ fn main() -> Result<()> {
             eprintln!("PDF written to {}", path.display());
         }
         if let Some(ref path) = oc.svg {
-            std::fs::write(path, render_svg_from_pdf(&pdf)?)?;
-            eprintln!("SVG written to {}", path.display());
+            write_svg_multi(&pdf, path)?;
         }
         if let Some(ref path) = oc.png {
             std::fs::write(path, render_png_from_pdf(&pdf, cli.scale)?)?;
@@ -762,10 +790,7 @@ fn main() -> Result<()> {
     } else if cfg.as_ref().and_then(|c| c.output.as_ref()).is_none() {
         if let Some(ref output) = cli.output {
             match cli.format.as_str() {
-                "svg" => {
-                    std::fs::write(output, render_svg_from_pdf(&pdf)?)?;
-                    eprintln!("SVG written to {}", output.display());
-                }
+                "svg" => write_svg_multi(&pdf, output)?,
                 "png" => {
                     std::fs::write(output, render_png_from_pdf(&pdf, cli.scale)?)?;
                     eprintln!("PNG written to {}", output.display());

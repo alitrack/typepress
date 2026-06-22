@@ -433,6 +433,15 @@ pub fn svg_unicode(pdf_bytes: &[u8], page: u32) -> Result<String> {
     Ok(svg)
 }
 
+/// Get the total number of pages in a PDF.
+pub fn page_count(pdf_bytes: &[u8]) -> Result<u32> {
+    let tmp = tempfile::NamedTempFile::new()?;
+    let path = tmp.path().to_path_buf();
+    std::fs::write(&path, pdf_bytes)?;
+    let doc = Document::load(&path).map_err(|e| anyhow::anyhow!("Failed to load PDF: {e}"))?;
+    Ok(doc.get_pages().len() as u32)
+}
+
 fn get_page_width(doc: &Document, page_num: u32) -> f32 {
     for (&pn, &page_id) in &doc.get_pages() {
         if pn != page_num {
