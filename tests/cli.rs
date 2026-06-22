@@ -9,6 +9,7 @@
 
 use assert_cmd::Command;
 use predicates::prelude::*;
+use regex::Regex;
 use std::path::PathBuf;
 
 fn tmp_path(name: &str) -> PathBuf {
@@ -83,6 +84,61 @@ fn cli_md_with_math() {
     cmd.assert().success();
 
     assert!(out.exists());
+    let _ = std::fs::remove_file(&out);
+}
+
+#[test]
+fn cli_math_svg_preserves_layout_features() {
+    let out = tmp_path("cli_math_layout.svg");
+    let _ = std::fs::remove_file(&out);
+
+    let mut cmd = binary();
+    cmd.args([
+        "--from", "md", "--math", "--stdin",
+        "--format", "svg",
+        "-o", out.to_str().unwrap(),
+    ]);
+    cmd.write_stdin(
+        "# Math\n\n$E = mc^2$\n\n$\\sqrt{2}$\n\n$$\\frac{1}{2}$$\n\n$\\int_0^\\infty x_i^2 dx$",
+    );
+    cmd.assert().success();
+
+    let svg = std::fs::read_to_string(&out).unwrap();
+    let size_re = Regex::new(r#"font-size="([0-9.]+)""#).unwrap();
+    let mut sizes: Vec<f32> = size_re
+        .captures_iter(&svg)
+        .filter_map(|caps| caps[1].parse::<f32>().ok())
+        .collect();
+    sizes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+    let min = *sizes.first().expect("expected at least one text item");
+    let max = *sizes.last().expect("expected at least one text item");
+
+    assert!(min < max, "math layout should produce reduced script font sizes");
+    assert!(svg.contains(">√<"), "radical glyph should be preserved");
+    assert!(svg.contains(">∞<"), "integral upper limit should be preserved");
+    assert!(!svg.contains("\\frac{1}{2}"), "raw LaTeX should not leak into output");
+
+    let _ = std::fs::remove_file(&out);
+}
+
+#[test]
+fn cli_mermaid_pdf_keeps_vector_content() {
+    let out = tmp_path("cli_mermaid.pdf");
+    let _ = std::fs::remove_file(&out);
+
+    let mut cmd = binary();
+    cmd.args(["--from", "md", "--stdin", "-o", out.to_str().unwrap()]);
+    cmd.write_stdin("# Diagram\n\n```mermaid\ngraph TD\n  A --> B\n```\n");
+    cmd.assert().success();
+
+    let pdf_bytes = std::fs::read(&out).unwrap();
+    let pdf_text = String::from_utf8_lossy(&pdf_bytes);
+    assert!(
+        !pdf_text.contains("/Subtype /Image") && !pdf_text.contains("/Subtype/Image"),
+        "Mermaid PDF should stay vector-backed instead of embedding a raster image"
+    );
+
     let _ = std::fs::remove_file(&out);
 }
 

@@ -165,91 +165,564 @@ fn parse_margin(s: &str) -> Margin {
 
 const ESCAPED_PLACEHOLDER: &str = "\x00TXP_ESC_DOLLAR\x00";
 
-fn process_math(html: &mut String) -> Result<usize> {
-    use katex::{KatexContext, Settings, render_to_string};
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
 
+fn html_dom_children_to_math_html(children: &[katex::dom_tree::HtmlDomNode]) -> String {
+    let mut html = String::new();
+    for child in children {
+        html.push_str(&html_dom_to_math_html(child));
+    }
+    html
+}
+
+fn html_dom_to_math_html(node: &katex::dom_tree::HtmlDomNode) -> String {
+    use katex::dom_tree::HtmlDomNode;
+
+    match node {
+        HtmlDomNode::MathML(math) => math_node_to_html(math),
+        HtmlDomNode::DomSpan(span) => html_dom_children_to_math_html(&span.children),
+        HtmlDomNode::Fragment(fragment) => html_dom_children_to_math_html(&fragment.children),
+        HtmlDomNode::Symbol(symbol) => escape_html(&symbol.text),
+        _ => String::new(),
+    }
+}
+
+fn math_children_to_plain_text(children: &[katex::mathml_tree::MathDomNode]) -> Option<String> {
+    let mut text = String::new();
+    for child in children {
+        text.push_str(&math_dom_to_plain_text(child)?);
+    }
+    Some(text)
+}
+
+fn math_children_to_html(children: &[katex::mathml_tree::MathDomNode]) -> String {
+    let mut html = String::new();
+    for child in children {
+        html.push_str(&math_dom_to_html(child));
+    }
+    html
+}
+
+fn math_dom_to_html(node: &katex::mathml_tree::MathDomNode) -> String {
+    use katex::mathml_tree::MathDomNode;
+
+    match node {
+        MathDomNode::Math(math) => math_node_to_html(math),
+        MathDomNode::Text(text) => escape_html(&text.text),
+        MathDomNode::Space(space) => escape_html(
+            space
+                .character
+                .as_deref()
+                .unwrap_or(" "),
+        ),
+        MathDomNode::Fragment(fragment) => math_children_to_html(&fragment.children),
+    }
+}
+
+fn math_dom_to_plain_text(node: &katex::mathml_tree::MathDomNode) -> Option<String> {
+    use katex::mathml_tree::MathDomNode;
+
+    match node {
+        MathDomNode::Math(math) => math_node_to_plain_text(math),
+        MathDomNode::Text(text) => Some(text.text.clone()),
+        MathDomNode::Space(space) => Some(
+            space
+                .character
+                .as_deref()
+                .unwrap_or(" ")
+                .to_string(),
+        ),
+        MathDomNode::Fragment(fragment) => math_children_to_plain_text(&fragment.children),
+    }
+}
+
+fn math_child_html(node: &katex::mathml_tree::MathNode, index: usize) -> String {
+    node.children
+        .get(index)
+        .map(math_dom_to_html)
+        .unwrap_or_default()
+}
+
+fn math_child_plain_text(node: &katex::mathml_tree::MathNode, index: usize) -> Option<String> {
+    node.children
+        .get(index)
+        .and_then(math_dom_to_plain_text)
+}
+
+fn unicode_superscript_char(ch: char) -> Option<char> {
+    Some(match ch {
+        '0' => '⁰',
+        '1' => '¹',
+        '2' => '²',
+        '3' => '³',
+        '4' => '⁴',
+        '5' => '⁵',
+        '6' => '⁶',
+        '7' => '⁷',
+        '8' => '⁸',
+        '9' => '⁹',
+        '+' => '⁺',
+        '-' => '⁻',
+        '=' => '⁼',
+        '(' => '⁽',
+        ')' => '⁾',
+        'a' => 'ᵃ',
+        'b' => 'ᵇ',
+        'c' => 'ᶜ',
+        'd' => 'ᵈ',
+        'e' => 'ᵉ',
+        'f' => 'ᶠ',
+        'g' => 'ᵍ',
+        'h' => 'ʰ',
+        'i' => 'ⁱ',
+        'j' => 'ʲ',
+        'k' => 'ᵏ',
+        'l' => 'ˡ',
+        'm' => 'ᵐ',
+        'n' => 'ⁿ',
+        'o' => 'ᵒ',
+        'p' => 'ᵖ',
+        'r' => 'ʳ',
+        's' => 'ˢ',
+        't' => 'ᵗ',
+        'u' => 'ᵘ',
+        'v' => 'ᵛ',
+        'w' => 'ʷ',
+        'x' => 'ˣ',
+        'y' => 'ʸ',
+        'z' => 'ᶻ',
+        'β' => 'ᵝ',
+        'γ' => 'ᵞ',
+        'δ' => 'ᵟ',
+        'θ' => 'ᶿ',
+        'φ' => 'ᵠ',
+        'χ' => 'ᵡ',
+        _ => return None,
+    })
+}
+
+fn unicode_subscript_char(ch: char) -> Option<char> {
+    Some(match ch {
+        '0' => '₀',
+        '1' => '₁',
+        '2' => '₂',
+        '3' => '₃',
+        '4' => '₄',
+        '5' => '₅',
+        '6' => '₆',
+        '7' => '₇',
+        '8' => '₈',
+        '9' => '₉',
+        '+' => '₊',
+        '-' => '₋',
+        '=' => '₌',
+        '(' => '₍',
+        ')' => '₎',
+        'a' => 'ₐ',
+        'e' => 'ₑ',
+        'h' => 'ₕ',
+        'i' => 'ᵢ',
+        'j' => 'ⱼ',
+        'k' => 'ₖ',
+        'l' => 'ₗ',
+        'm' => 'ₘ',
+        'n' => 'ₙ',
+        'o' => 'ₒ',
+        'p' => 'ₚ',
+        'r' => 'ᵣ',
+        's' => 'ₛ',
+        't' => 'ₜ',
+        'u' => 'ᵤ',
+        'v' => 'ᵥ',
+        'x' => 'ₓ',
+        'β' => 'ᵦ',
+        'γ' => 'ᵧ',
+        'ρ' => 'ᵨ',
+        'φ' => 'ᵩ',
+        'χ' => 'ᵪ',
+        _ => return None,
+    })
+}
+
+fn unicode_superscript(text: &str) -> Option<String> {
+    let mut rendered = String::new();
+    for ch in text.chars() {
+        rendered.push(unicode_superscript_char(ch)?);
+    }
+    Some(rendered)
+}
+
+fn unicode_subscript(text: &str) -> Option<String> {
+    let mut rendered = String::new();
+    for ch in text.chars() {
+        rendered.push(unicode_subscript_char(ch)?);
+    }
+    Some(rendered)
+}
+
+fn render_superscript_text(text: &str) -> String {
+    if let Some(mapped) = unicode_superscript(text) {
+        mapped
+    } else {
+        format!(
+            r#"<span class="txp-script-sup">{}</span>"#,
+            escape_html(text)
+        )
+    }
+}
+
+fn render_script_stack_fallback(base: &str, over: Option<&str>, under: Option<&str>) -> String {
+    let mut stack = String::new();
+    if let Some(over) = over {
+        stack.push_str(&format!(r#"<span class="txp-script-over">{over}</span>"#));
+    }
+    if let Some(under) = under {
+        stack.push_str(&format!(r#"<span class="txp-script-under">{under}</span>"#));
+    }
+    format!(
+        r#"<span class="txp-script-pair"><span class="txp-script-base">{base}</span><span class="txp-script-stack">{stack}</span></span>"#
+    )
+}
+
+fn is_large_operator_text(text: &str) -> bool {
+    matches!(
+        text.trim(),
+        "∫" | "∮" | "∯" | "∰" | "∑" | "∏" | "⋂" | "⋃" | "⋁" | "⋀" | "⨀" | "⨁" | "⨂" | "⨆"
+    )
+}
+
+fn render_large_operator_limits(base: &str, over: Option<&str>, under: Option<&str>) -> String {
+    let over_html = over
+        .map(|value| format!(r#"<span class="txp-op-over">{value}</span>"#))
+        .unwrap_or_default();
+    let under_html = under
+        .map(|value| format!(r#"<span class="txp-op-under">{value}</span>"#))
+        .unwrap_or_default();
+    format!(
+        r#"<span class="txp-op-limits">{over_html}<span class="txp-op-base">{base}</span>{under_html}</span>"#
+    )
+}
+
+fn math_node_to_plain_text(node: &katex::mathml_tree::MathNode) -> Option<String> {
+    use katex::mathml_tree::{MathDomNode, MathNodeType};
+
+    match node.node_type {
+        MathNodeType::Math
+        | MathNodeType::Mrow
+        | MathNodeType::Mstyle
+        | MathNodeType::Mpadded
+        | MathNodeType::Mphantom
+        | MathNodeType::Mi
+        | MathNodeType::Mn
+        | MathNodeType::Mo
+        | MathNodeType::Mtext => math_children_to_plain_text(&node.children),
+        MathNodeType::Semantics => {
+            let mut text = String::new();
+            for child in &node.children {
+                match child {
+                    MathDomNode::Math(math) if math.node_type == MathNodeType::Annotation => {}
+                    _ => text.push_str(&math_dom_to_plain_text(child)?),
+                }
+            }
+            Some(text)
+        }
+        MathNodeType::Annotation => Some(String::new()),
+        MathNodeType::Mspace => Some(" ".to_string()),
+        MathNodeType::Menclose => math_children_to_plain_text(&node.children),
+        MathNodeType::Mglyph => node.attributes.get("alt").cloned(),
+        _ => None,
+    }
+}
+
+fn math_node_to_html(node: &katex::mathml_tree::MathNode) -> String {
+    use katex::mathml_tree::{MathDomNode, MathNodeType};
+
+    match node.node_type {
+        MathNodeType::Math
+        | MathNodeType::Mrow
+        | MathNodeType::Mstyle
+        | MathNodeType::Mpadded
+        | MathNodeType::Mphantom => math_children_to_html(&node.children),
+        MathNodeType::Semantics => {
+            let mut html = String::new();
+            for child in &node.children {
+                match child {
+                    MathDomNode::Math(math) if math.node_type == MathNodeType::Annotation => {}
+                    _ => html.push_str(&math_dom_to_html(child)),
+                }
+            }
+            html
+        }
+        MathNodeType::Annotation => String::new(),
+        MathNodeType::Mi | MathNodeType::Mn | MathNodeType::Mo | MathNodeType::Mtext => {
+            math_children_to_html(&node.children)
+        }
+        MathNodeType::Mspace => " ".to_string(),
+        MathNodeType::Msup => {
+            let base = math_child_html(node, 0);
+            let sup = math_child_html(node, 1);
+            if let Some(base_text) = math_child_plain_text(node, 0) {
+                if is_large_operator_text(&base_text) {
+                    return render_large_operator_limits(&base, Some(&sup), None);
+                }
+            }
+            if let Some(sup_text) = math_child_plain_text(node, 1) {
+                format!("{base}{}", render_superscript_text(&sup_text))
+            } else {
+                render_script_stack_fallback(&base, Some(&sup), None)
+            }
+        }
+        MathNodeType::Msub => {
+            let base = math_child_html(node, 0);
+            let sub = math_child_html(node, 1);
+            if let Some(base_text) = math_child_plain_text(node, 0) {
+                if is_large_operator_text(&base_text) {
+                    return render_large_operator_limits(&base, None, Some(&sub));
+                }
+            }
+            if let Some(sub_text) = math_child_plain_text(node, 1).and_then(|text| unicode_subscript(&text)) {
+                format!("{base}{sub_text}")
+            } else {
+                render_script_stack_fallback(&base, None, Some(&sub))
+            }
+        }
+        MathNodeType::Msubsup => {
+            let base = math_child_html(node, 0);
+            let sub = math_child_html(node, 1);
+            let sup = math_child_html(node, 2);
+            if let Some(base_text) = math_child_plain_text(node, 0) {
+                if is_large_operator_text(&base_text) {
+                    return render_large_operator_limits(&base, Some(&sup), Some(&sub));
+                }
+            }
+            let sub_text = math_child_plain_text(node, 1).and_then(|text| unicode_subscript(&text));
+            let sup_text = math_child_plain_text(node, 2);
+            if let Some(sub_text) = sub_text {
+                if let Some(sup_text) = sup_text {
+                    format!("{base}{sub_text}{}", render_superscript_text(&sup_text))
+                } else {
+                    render_script_stack_fallback(&base, Some(&sup), Some(&sub))
+                }
+            } else {
+                render_script_stack_fallback(&base, Some(&sup), Some(&sub))
+            }
+        }
+        MathNodeType::Mfrac => {
+            let numerator = math_child_html(node, 0);
+            let denominator = math_child_html(node, 1);
+            format!(
+                r#"<span class="txp-frac"><span class="txp-frac-num">{numerator}</span><span class="txp-frac-den">{denominator}</span></span>"#
+            )
+        }
+        MathNodeType::Msqrt => {
+            let radicand = math_children_to_html(&node.children);
+            format!(
+                r#"<span class="txp-sqrt"><span class="txp-sqrt-glyph">√</span><span class="txp-sqrt-body">{radicand}</span></span>"#
+            )
+        }
+        MathNodeType::Mroot => {
+            let body = math_child_html(node, 0);
+            let index = math_child_html(node, 1);
+            format!(
+                r#"<span class="txp-root"><sup>{index}</sup><span class="txp-sqrt"><span class="txp-sqrt-glyph">√</span><span class="txp-sqrt-body">{body}</span></span></span>"#
+            )
+        }
+        MathNodeType::Mover => {
+            let base = math_child_html(node, 0);
+            let over = math_child_html(node, 1);
+            format!(
+                r#"<span class="txp-overunder"><span class="txp-script-over">{over}</span><span class="txp-overunder-base">{base}</span></span>"#
+            )
+        }
+        MathNodeType::Munder => {
+            let base = math_child_html(node, 0);
+            let under = math_child_html(node, 1);
+            format!(
+                r#"<span class="txp-overunder"><span class="txp-overunder-base">{base}</span><span class="txp-script-under">{under}</span></span>"#
+            )
+        }
+        MathNodeType::Munderover => {
+            let base = math_child_html(node, 0);
+            let under = math_child_html(node, 1);
+            let over = math_child_html(node, 2);
+            format!(
+                r#"<span class="txp-overunder"><span class="txp-script-over">{over}</span><span class="txp-overunder-base">{base}</span><span class="txp-script-under">{under}</span></span>"#
+            )
+        }
+        MathNodeType::Mtable => {
+            let mut rows = String::new();
+            for child in &node.children {
+                rows.push_str(&math_dom_to_html(child));
+            }
+            format!(r#"<table class="txp-matrix"><tbody>{rows}</tbody></table>"#)
+        }
+        MathNodeType::Mtr | MathNodeType::Mlabeledtr => {
+            let mut cells = String::new();
+            for child in &node.children {
+                match child {
+                    MathDomNode::Math(math) if math.node_type == MathNodeType::Mtd => {
+                        cells.push_str(&math_dom_to_html(child));
+                    }
+                    _ => {
+                        cells.push_str(&format!("<td>{}</td>", math_dom_to_html(child)));
+                    }
+                }
+            }
+            format!("<tr>{cells}</tr>")
+        }
+        MathNodeType::Mtd => {
+            let inner = math_children_to_html(&node.children);
+            format!("<td>{inner}</td>")
+        }
+        MathNodeType::Menclose => {
+            let inner = math_children_to_html(&node.children);
+            let notation = node
+                .attributes
+                .get("notation")
+                .map(String::as_str)
+                .unwrap_or_default();
+            if notation.contains("box") {
+                format!(r#"<span class="txp-menclose-box">{inner}</span>"#)
+            } else {
+                inner
+            }
+        }
+        MathNodeType::Mglyph => node
+            .attributes
+            .get("alt")
+            .map(|text| escape_html(text))
+            .unwrap_or_default(),
+    }
+}
+
+fn render_math_markup(latex: &str, display_mode: bool) -> Result<String> {
+    use katex::types::OutputFormat;
+    use katex::{KatexContext, Settings, render_to_dom_tree};
+
+    let ctx = KatexContext::default();
+    let mut settings = Settings::default();
+    settings.display_mode = display_mode;
+    settings.output = OutputFormat::Mathml;
+
+    let dom = render_to_dom_tree(&ctx, latex, &settings)
+        .map_err(|e| anyhow::anyhow!("katex error: {e:?}"))?;
+    let body = html_dom_children_to_math_html(&dom.children);
+    let class = if display_mode {
+        "txp-math txp-math-display"
+    } else {
+        "txp-math txp-math-inline"
+    };
+    Ok(format!(r#"<span class="{class}">{body}</span>"#))
+}
+
+fn math_fallback_markup(latex: &str, display_mode: bool) -> String {
+    let class = if display_mode {
+        "txp-math txp-math-display txp-math-error"
+    } else {
+        "txp-math txp-math-inline txp-math-error"
+    };
+    format!(r#"<span class="{class}">{}</span>"#, escape_html(latex))
+}
+
+fn detect_mermaid_system_font(prefer_cjk: bool) -> Option<(PathBuf, &'static str)> {
+    let cjk_candidates: &[(&str, &str)] = &[
+        ("WenQuanYi Zen Hei", "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
+        ("WenQuanYi Micro Hei", "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"),
+        ("Microsoft YaHei", "/mnt/c/Windows/Fonts/msyh.ttc"),
+        ("SimSun", "/mnt/c/Windows/Fonts/simsun.ttc"),
+    ];
+    let latin_candidates: &[(&str, &str)] = &[
+        ("DejaVu Sans", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        (
+            "Liberation Sans",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        ),
+        ("WenQuanYi Zen Hei", "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
+    ];
+
+    let chains: [&[(&str, &str)]; 2] = if prefer_cjk {
+        [cjk_candidates, latin_candidates]
+    } else {
+        [latin_candidates, cjk_candidates]
+    };
+
+    for chain in chains {
+        for (family, path) in chain {
+            let p = PathBuf::from(path);
+            if p.exists() {
+                return Some((p, *family));
+            }
+        }
+    }
+
+    None
+}
+
+
+fn process_math(html: &mut String) -> Result<usize> {
     *html = html.replace("\\$", ESCAPED_PLACEHOLDER);
 
     let display_re = Regex::new(r"(?s)\$\$(.+?)\$\$")?;
     let inline_re = Regex::new(r"\$([^$]+?)\$")?;
 
-    let ctx = KatexContext::default();
-    let count = &mut 0usize;
-
-    // Regex to strip MathML annotation (contains raw LaTeX that pollutes PDF output).
-    // (?s) flag is CRITICAL — katex-rs outputs annotation on multiple lines.
-    let mathml_re = Regex::new(r#"(?s)<span class="katex-mathml">.*?</span>"#)?;
-
-    // Regex to extract plain text from KaTeX HTML (strips CSS spans, keeps raw Unicode).
-    // Krilla's CSS engine can't handle KaTeX's positioning model (dozens of nested spans),
-    // so we render math as Unicode text with the surrounding math formatting class.
-    let strip_tags_re = Regex::new(r"<[^>]+>")?;
+    let mut count = 0usize;
 
     // Display math $$...$$
-    // Collect all matches first to avoid re-scanning KaTeX output (recursion defense)
     let display_matches: Vec<_> = display_re
         .captures_iter(html)
         .map(|c| (c.get(0).unwrap().range(), c.get(1).unwrap().as_str().to_string()))
         .collect();
     for (range, latex) in display_matches.into_iter().rev() {
-        let mut rendered = render_to_string(
-            &ctx,
-            &latex,
-            &Settings {
-                display_mode: true,
-                ..Default::default()
-            },
-        )
-        .map_err(|e| anyhow::anyhow!("katex error in display math: {e:?}"))?;
-        // Strip MathML to avoid raw LaTeX text appearing in PDF
-        rendered = mathml_re.replace(&rendered, "").to_string();
-        // Strip all KaTeX span tags — keep only Unicode text content.
-        // Krilla's CSS engine can't handle KaTeX's dozen-layer positioning model.
-        let plain = strip_tags_re.replace_all(&rendered, "").to_string();
-        html.replace_range(
-            range,
-            &format!("<span class=\"katex-display\" style=\"font-family:DejaVuSerif,serif\">{plain}</span>"),
-        );
-        *count += 1;
+        let rendered = match render_math_markup(&latex, true) {
+            Ok(markup) => {
+                count += 1;
+                markup
+            }
+            Err(e) => {
+                eprintln!("Warning: display math render failed for '{latex}': {e}");
+                math_fallback_markup(&latex, true)
+            }
+        };
+        html.replace_range(range, &rendered);
     }
 
     // Inline math $...$
-    // Collect all matches first (same recursion defense as display math)
     let inline_matches: Vec<_> = inline_re
         .captures_iter(html)
         .map(|c| (c.get(0).unwrap().range(), c.get(1).unwrap().as_str().to_string()))
         .collect();
     for (range, latex) in inline_matches.into_iter().rev() {
-        let mut rendered = render_to_string(&ctx, &latex, &Settings::default())
-            .map_err(|e| anyhow::anyhow!("katex error in inline math: {e:?}"))?;
-        // Strip MathML
-        rendered = mathml_re.replace(&rendered, "").to_string();
-        // Strip all KaTeX span tags — keep only Unicode text content
-        let plain = strip_tags_re.replace_all(&rendered, "").to_string();
-        html.replace_range(
-            range,
-            &format!("<font face=\"DejaVuSerif\"><span class=\"katex-inline\">{plain}</span></font>"),
-        );
-        *count += 1;
+        let rendered = match render_math_markup(&latex, false) {
+            Ok(markup) => {
+                count += 1;
+                markup
+            }
+            Err(e) => {
+                eprintln!("Warning: inline math render failed for '{latex}': {e}");
+                math_fallback_markup(&latex, false)
+            }
+        };
+        html.replace_range(range, &rendered);
     }
 
     *html = html.replace(ESCAPED_PLACEHOLDER, "\\$");
-
-    // KaTeX CSS is injected after markdown_to_html (see main pipeline)
-    // because inject_css requires </head> which only exists after HTML wrapping.
-
-    Ok(*count)
+    Ok(count)
 }
 
 // ── Mermaid Processing ─────────────────────────────────────────────────
 
-fn process_mermaid(html: &mut String, output_dir: Option<&Path>) -> Result<usize> {
+fn process_mermaid(html: &mut String) -> Result<usize> {
     use mermaid_rs::{EstimatedMeasure, render_diagram};
 
     let re = Regex::new(r"(?s)```mermaid\r?\n(.*?)```")?;
     let mut count = 0usize;
 
-    // Collect all matches first (avoid borrow issues with mutable html)
     let matches: Vec<_> = re
         .captures_iter(html)
         .map(|c| {
@@ -260,82 +733,31 @@ fn process_mermaid(html: &mut String, output_dir: Option<&Path>) -> Result<usize
         })
         .collect();
 
-    // Process in reverse order to preserve positions
     for (range, source) in matches.into_iter().rev() {
-        let style = mermaid_rs::DiagramStyle::default();
+        let mermaid_font = detect_mermaid_system_font(source.chars().any(|c| !c.is_ascii()));
+        let mut style = mermaid_rs::DiagramStyle::default();
+        if let Some((_, family)) = mermaid_font.as_ref() {
+            style.font_family = (*family).to_string();
+        }
+
         match render_diagram(&source, &style, &mut EstimatedMeasure) {
             Ok((svg, w, h)) => {
                 let svg_w = w.max(100.0);
                 let svg_h = h.max(100.0);
-                let png_name = if count == 0 {
-                    "diagram.png".to_string()
-                } else {
-                    format!("diagram_{count}.png")
-                };
-                let svg_name = if count == 0 {
-                    "diagram.svg".to_string()
-                } else {
-                    format!("diagram_{count}.svg")
-                };
-
-                if let Some(dir) = output_dir {
-                    let svg_path = dir.join(&svg_name);
-                    let png_path = dir.join(&png_name);
-
-                    // Save SVG for reference (wrapped in proper <svg> document for resvg compatibility)
-                    // mermaid-rs outputs SVG fragments without root <svg> element
-                    let svg_doc = format!(
-                        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}">{svg}</svg>"#
-                    );
-                    if let Err(e) = std::fs::write(&svg_path, &svg_doc) {
-                        eprintln!(
-                            "Warning: failed to write mermaid SVG to {}: {e}",
-                            svg_path.display()
-                        );
-                    }
-
-                    // Convert SVG to PNG using resvg CLI (pure Rust SVG renderer)
-                    match std::process::Command::new("resvg")
-                        .arg(&svg_path)
-                        .arg(&png_path)
-                        .output()
-                    {
-                        Ok(out) if out.status.success() => {
-                            // PNG generated successfully — embed as <img> tag
-                            let img_html = format!(
-                                r#"<div style="text-align:center;margin:1em 0"><img src="{}" alt="Mermaid diagram" style="max-width:100%;height:auto"/></div>"#,
-                                png_path.display()
-                            );
-                            html.replace_range(range, &img_html);
-                        }
-                        Ok(out) => {
-                            let stderr = String::from_utf8_lossy(&out.stderr);
-                            eprintln!("Warning: resvg failed for {}: {stderr}", svg_path.display());
-                            // Fallback to placeholder
-                            let fallback = format!(
-                                r#"<div class="mermaid-placeholder" style="border:2px dashed #ccc;padding:2em;text-align:center;margin:1em 0;color:#888;font-style:italic">Mermaid diagram → {svg_name}</div>"#
-                            );
-                            html.replace_range(range, &fallback);
-                        }
-                        Err(e) => {
-                            eprintln!("Warning: resvg not found for {}: {e}", svg_path.display());
-                            // Fallback to placeholder
-                            let fallback = format!(
-                                r#"<div class="mermaid-placeholder" style="border:2px dashed #ccc;padding:2em;text-align:center;margin:1em 0;color:#888;font-style:italic">Mermaid diagram → {svg_name}</div>"#
-                            );
-                            html.replace_range(range, &fallback);
-                        }
-                    }
-                } else {
-                    // No output directory — fallback to placeholder
-                    let wrapped = format!(
-                        r#"<div class="mermaid-placeholder" style="border:2px dashed #ccc;padding:2em;text-align:center;margin:1em 0;color:#888;font-style:italic">Mermaid diagram → {svg_name}</div>"#
-                    );
-                    html.replace_range(range, &wrapped);
-                }
+                let svg_doc = format!(
+                    r#"<div class="txp-mermaid" style="text-align:center;margin:1em 0"><svg xmlns="http://www.w3.org/2000/svg" width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}" style="display:block;margin:0 auto">{svg}</svg></div>"#
+                );
+                html.replace_range(range, &svg_doc);
                 count += 1;
             }
-            Err(e) => eprintln!("Warning: mermaid render failed: {e}"),
+            Err(e) => {
+                eprintln!("Warning: mermaid render failed: {e}");
+                let fallback = format!(
+                    r#"<div class="mermaid-placeholder" style="border:2px dashed #ccc;padding:2em;text-align:center;margin:1em 0;color:#888;font-style:italic">Mermaid render failed: {}</div>"#,
+                    escape_html(source.trim())
+                );
+                html.replace_range(range, &fallback);
+            }
         }
     }
 
@@ -675,25 +1097,20 @@ fn main() -> Result<()> {
         Vec::new()
     };
 
-    let mut math_count = 0usize;
-
     let header_css;
-
-    // Determine Mermaid SVG output directory (alongside output file or CWD)
-    let mermaid_output_dir: Option<PathBuf> = cli.output.as_ref().and_then(|o| o.parent().map(|p| p.to_path_buf()));
 
     if is_md {
         // MD pipeline: Mermaid → Math → Markdown→HTML → Header/Footer → Highlight
 
         // 0a. Mermaid (raw markdown)
-        match process_mermaid(&mut html, mermaid_output_dir.as_deref()) {
+        match process_mermaid(&mut html) {
             Ok(n) if n > 0 => eprintln!("Rendered {n} mermaid diagram(s)"),
             Err(e) => eprintln!("Warning: mermaid processing failed: {e}"),
             _ => {}
         }
 
         // 0b. Math (raw markdown — pre-empts pulldown-cmark's ENABLE_MATH)
-        math_count = if math_enabled {
+        let math_count = if math_enabled {
             match process_math(&mut html) {
                 Ok(n) => {
                     if n > 0 {
@@ -751,7 +1168,7 @@ fn main() -> Result<()> {
         }
 
         // 3. Mermaid
-        match process_mermaid(&mut html, mermaid_output_dir.as_deref()) {
+        match process_mermaid(&mut html) {
             Ok(n) if n > 0 => eprintln!("Rendered {n} mermaid diagram(s)"),
             Err(e) => eprintln!("Warning: mermaid processing failed: {e}"),
             _ => {}
@@ -974,4 +1391,57 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod preprocess_tests {
+    use super::*;
+
+    #[test]
+    fn render_math_markup_preserves_structured_layout() {
+        let inline = render_math_markup(r"E = mc^2", false).unwrap();
+        assert!(inline.contains("mc²"));
+
+        let inline_sub = render_math_markup(r"x_1 + x_2", false).unwrap();
+        assert!(inline_sub.contains("x₁"));
+        assert!(inline_sub.contains("x₂"));
+
+        let limits = render_math_markup(r"\int_0^\infty x_i^2 dx", false).unwrap();
+        assert!(limits.contains("txp-op-limits"));
+        assert!(limits.contains("txp-op-over"));
+        assert!(limits.contains("txp-op-under"));
+        assert!(limits.contains("xᵢ²"));
+
+        let fraction = render_math_markup(r"\frac{1}{2}", true).unwrap();
+        assert!(fraction.contains("txp-frac"));
+        assert!(fraction.contains("txp-frac-num"));
+        assert!(fraction.contains("txp-frac-den"));
+
+        let radical = render_math_markup(r"\sqrt{2}", false).unwrap();
+        assert!(radical.contains("txp-sqrt"));
+        assert!(radical.contains("txp-sqrt-glyph"));
+    }
+
+    #[test]
+    fn process_math_keeps_going_after_invalid_expression() {
+        let mut markdown = String::from("Good $E = mc^2$ bad $$\\badcommand$$ still $x_1$.");
+        let rendered = process_math(&mut markdown).unwrap();
+
+        assert_eq!(rendered, 2, "only valid expressions should count as rendered");
+        assert!(markdown.contains("mc²"));
+        assert!(markdown.contains("txp-math-error"));
+        assert!(markdown.contains("x₁"));
+    }
+
+    #[test]
+    fn process_mermaid_generates_inline_svg() {
+        let mut markdown = String::from("```mermaid\ngraph TD\n  A --> B\n```");
+        let rendered = process_mermaid(&mut markdown).unwrap();
+
+        assert_eq!(rendered, 1);
+        assert!(markdown.contains("<svg"));
+        assert!(markdown.contains("viewBox="));
+        assert!(markdown.contains("A"));
+        assert!(!markdown.contains("mermaid-placeholder"));
+    }
 }

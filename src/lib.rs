@@ -26,12 +26,22 @@ pub fn markdown_to_html_with_css(input: &str, extra_css: &str) -> String {
     let parser = Parser::new_ext(input, options);
     let mut html_output = String::new();
     html::push_html(&mut html_output, parser);
-    // Fix self-closing tags that Blitz/fulgur doesn't understand
-    let html_output = html_output.replace(" />", ">");
+    // Normalize HTML void tags for Blitz/fulgur without corrupting raw SVG blocks.
+    let html_output = normalize_self_closing_html_tags(&html_output);
     let combined_css = format!("{DEFAULT_PRINT_CSS}{extra_css}");
     format!(
         "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><style>{combined_css}</style></head><body>\n{html_output}\n</body></html>"
     )
+}
+
+fn normalize_self_closing_html_tags(input: &str) -> String {
+    use regex::Regex;
+
+    let re = Regex::new(
+        r#"(?i)<(area|base|br|col|embed|hr|img|input|link|meta|source|track|wbr)\b([^>]*?)\s*/>"#,
+    )
+    .expect("valid void-tag regex");
+    re.replace_all(input, "<$1$2>").into_owned()
 }
 
 /// Inject header/footer running elements and @page CSS rules.
@@ -156,4 +166,27 @@ pub fn render_markdown_to_pdf(
     let pdf = engine.render_html(&html)?;
     std::fs::write(output, &pdf)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn markdown_html_normalization_preserves_raw_svg() {
+        let markdown = r#"
+<div><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><polyline points="0,0 10,10" /></svg></div>
+"#;
+
+        let html = markdown_to_html(markdown);
+        assert!(html.contains("<polyline points=\"0,0 10,10\" />"));
+    }
+
+    #[test]
+    fn markdown_html_normalization_rewrites_html_void_tags_only() {
+        let html = normalize_self_closing_html_tags(r#"<img src="a.png" /><br /><polyline points="0,0 1,1" />"#);
+        assert!(html.contains(r#"<img src="a.png">"#));
+        assert!(html.contains("<br>"));
+        assert!(html.contains(r#"<polyline points="0,0 1,1" />"#));
+    }
 }
