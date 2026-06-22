@@ -309,50 +309,56 @@ fn process_mermaid(html: &mut String, output_dir: Option<&Path>) -> Result<usize
 
 // ── Font Scanning ──────────────────────────────────────────────────────
 
-fn scan_font_dir(dir: &Path) -> Vec<PathBuf> {
-    let mut fonts = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.filter_map(|e| e.ok()) {
-            let path = entry.path();
-            let ext = path
-                .extension()
-                .and_then(|s| s.to_str())
-                .map(|s| s.to_ascii_lowercase());
-            if matches!(ext.as_deref(), Some("ttf" | "otf" | "woff2")) {
-                fonts.push(path);
-            }
-        }
-        fonts.sort();
-    }
-    fonts
-}
 
 fn auto_detect_katex_fonts() -> Option<PathBuf> {
-    // 1. npm global install
-    if let Ok(prefix) = std::process::Command::new("npm")
-        .args(["config", "get", "prefix"])
-        .output()
-    {
-        let root = String::from_utf8_lossy(&prefix.stdout).trim().to_string();
-        let direct = PathBuf::from(&root).join("lib/node_modules/katex/dist/fonts");
+    // 1. Common npm global locations (no subprocess, pure path check)
+    for npm_root in katex_npm_roots() {
+        let direct = npm_root.join("katex/dist/fonts");
         if direct.is_dir() {
             return Some(direct);
         }
-
-        let base = PathBuf::from(&root).join("lib/node_modules");
-        if let Some(found) = find_katex_fonts_in(&base, 0, 3) {
+        if let Some(found) = find_katex_fonts_in(&npm_root, 0, 3) {
             return Some(found);
         }
     }
 
-    // 2. System paths
-    for p in &["/usr/share/katex/fonts", "/usr/local/share/katex/fonts"] {
+    // 2. System paths (Linux, macOS Homebrew)
+    for p in &[
+        "/usr/share/katex/fonts",
+        "/usr/local/share/katex/fonts",
+        "/opt/homebrew/share/katex/fonts",
+    ] {
         let path = PathBuf::from(p);
         if path.is_dir() {
             return Some(path);
         }
     }
     None
+}
+
+/// Common npm global node_modules root directories across platforms.
+fn katex_npm_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    // npm prefix (env var or standard locations)
+    if let Ok(prefix) = std::env::var("npm_config_prefix") {
+        roots.push(PathBuf::from(&prefix).join("lib/node_modules"));
+    }
+    // Unix: $HOME/.npm-global or /usr/local
+    if let Ok(home) = std::env::var("HOME") {
+        roots.push(PathBuf::from(&home).join(".npm-global/lib/node_modules"));
+        roots.push(PathBuf::from(&home).join("node_modules"));
+    }
+    #[cfg(target_os = "linux")]
+    roots.push(PathBuf::from("/usr/local/lib/node_modules"));
+    #[cfg(target_os = "macos")]
+    roots.push(PathBuf::from("/opt/homebrew/lib/node_modules"));
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            roots.push(PathBuf::from(&appdata).join("npm/node_modules"));
+        }
+    }
+    roots
 }
 
 fn find_katex_fonts_in(dir: &Path, depth: usize, max: usize) -> Option<PathBuf> {
@@ -569,7 +575,7 @@ fn main() -> Result<()> {
                 "svg" => write_svg_multi(&pdf_bytes, output)?,
                 "png" => {
                     std::fs::write(output, render_png_from_pdf(&pdf_bytes, cli.scale)?)?;
-                    eprintln!("PNG written to {}", output.display());
+                    eprintln!("PNG written to {} (note: rasterized as text bounding boxes, not rendered text)", output.display());
                 }
                 _ => {
                     std::fs::write(output, &pdf_bytes)?;
@@ -593,7 +599,7 @@ fn main() -> Result<()> {
             }
         });
         if let Some(ref dir) = target {
-            let fonts = scan_font_dir(dir);
+            let fonts = fonts::scan_font_dir(dir);
             if !fonts.is_empty() {
                 eprintln!("Math: {} font(s) from {}", fonts.len(), dir.display());
             }
@@ -830,11 +836,11 @@ fn main() -> Result<()> {
         }
         if let Some(ref path) = oc.png {
             std::fs::write(path, render_png_from_pdf(&pdf, cli.scale)?)?;
-            eprintln!("PNG written to {}", path.display());
+            eprintln!("PNG written to {} (note: rasterized as text bounding boxes, not rendered text)", path.display());
         }
     }
 
-    // CLI-driven output (--format + -o)
+    // CLI-driven output (--format + -o). Skip if YAML config already handles this format.
     if to_stdout {
         match cli.format.as_str() {
             "svg" => print!("{}", render_svg_from_pdf(&pdf)?),
@@ -847,13 +853,21 @@ fn main() -> Result<()> {
                 std::io::stdout().write_all(&pdf)?;
             }
         }
-    } else if cfg.as_ref().and_then(|c| c.output.as_ref()).is_none() {
-        if let Some(ref output) = cli.output {
+    } else if let Some(ref output) = cli.output {
+        // Check if YAML already handles this specific format
+        let yaml_has_format = cfg.as_ref().and_then(|c| c.output.as_ref()).map_or(false, |oc| {
+            match cli.format.as_str() {
+                "svg" => oc.svg.is_some(),
+                "png" => oc.png.is_some(),
+                _ => oc.pdf.is_some(),
+            }
+        });
+        if !yaml_has_format {
             match cli.format.as_str() {
                 "svg" => write_svg_multi(&pdf, output)?,
                 "png" => {
                     std::fs::write(output, render_png_from_pdf(&pdf, cli.scale)?)?;
-                    eprintln!("PNG written to {}", output.display());
+                    eprintln!("PNG written to {} (note: rasterized as text bounding boxes, not rendered text)", output.display());
                 }
                 _ => {
                     std::fs::write(output, &pdf)?;
