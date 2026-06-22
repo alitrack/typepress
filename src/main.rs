@@ -17,7 +17,6 @@ use std::path::{Path, PathBuf};
 mod config;
 mod svg;
 mod fonts;
-mod highlight;
 use config::TypePressConfig;
 use typepress::{markdown_to_html, inject_header_footer};
 
@@ -663,7 +662,7 @@ fn main() -> Result<()> {
     }
 
     // 4. Apply code syntax highlighting (syntect)
-    match highlight::highlight_code_blocks(&mut html) {
+    match typepress::highlight::highlight_code_blocks(&mut html) {
         Ok(n) if n > 0 => eprintln!("Highlighted {n} code block(s)"),
         Err(e) => eprintln!("Warning: code highlighting failed: {e}"),
         _ => {}

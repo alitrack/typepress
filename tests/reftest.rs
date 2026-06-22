@@ -266,6 +266,99 @@ fn test_golden_svg_unicode() {
     let _ = std::fs::remove_file(&pdf_path);
 }
 
+// ── HTML pipeline tests ──────────────────────────────────────────────────
+
+#[test]
+fn test_html_direct_input() {
+    let html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"></head><body><h1>Direct HTML</h1><p>Rendered from raw HTML input.</p></body></html>";
+    let pdf_path = tmp_path("html_direct.pdf");
+    use fulgur::engine::Engine;
+    let engine = Engine::builder().build();
+    let pdf = engine.render_html(html).unwrap();
+    std::fs::write(&pdf_path, &pdf).unwrap();
+    assert!(pdf_path.exists());
+    assert!(pdf.starts_with(b"%PDF-"));
+    let _ = std::fs::remove_file(&pdf_path);
+}
+
+#[test]
+fn test_html_with_custom_css() {
+    let html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"></head><body><h1>Styled</h1><p class=\"red\">Red text via CSS.</p></body></html>";
+    let pdf_path = tmp_path("html_css.pdf");
+    use fulgur::asset::AssetBundle;
+    use fulgur::engine::Engine;
+    let mut assets = AssetBundle::new();
+    assets.add_css(".red { color: red; font-weight: bold; }");
+    let engine = Engine::builder().assets(assets).build();
+    let pdf = engine.render_html(html).unwrap();
+    std::fs::write(&pdf_path, &pdf).unwrap();
+    assert!(pdf_path.exists());
+    let _ = std::fs::remove_file(&pdf_path);
+}
+
+// ── Negative / error-path tests ──────────────────────────────────────────
+
+#[test]
+fn test_negative_empty_markdown() {
+    let pdf_path = tmp_path("empty.pdf");
+    let result = typepress::render_markdown_to_pdf("", &pdf_path, &[], &[], None, None);
+    // Empty markdown should still produce a valid PDF (just empty page)
+    assert!(result.is_ok(), "Empty markdown should succeed: {:?}", result.err());
+    assert!(pdf_path.exists());
+    let _ = std::fs::remove_file(&pdf_path);
+}
+
+#[test]
+fn test_negative_invalid_html_no_panic() {
+    let md = "unmatched <b> tags and <broken stuff";
+    let pdf_path = tmp_path("invalid.pdf");
+    // Should not panic — fulgur should handle malformed HTML gracefully
+    let result = typepress::render_markdown_to_pdf(md, &pdf_path, &[], &[], None, None);
+    assert!(result.is_ok(), "Invalid HTML should not crash: {:?}", result.err());
+    let _ = std::fs::remove_file(&pdf_path);
+}
+
+#[test]
+fn test_negative_multiline_math_edge_cases() {
+    let md = "$$\n\\begin{aligned}\nx &= 1 \\\\\ny &= 2\n\\end{aligned}\n$$\n\n$$\n\n\n$$\n\nText after empty math.";
+    let pdf_path = tmp_path("math_edge.pdf");
+    typepress::render_markdown_to_pdf(md, &pdf_path, &[], &[], None, None).unwrap();
+    assert!(pdf_path.exists());
+    let _ = std::fs::remove_file(&pdf_path);
+}
+
+#[test]
+fn test_negative_special_characters() {
+    let md = "# Special Chars\n\n& < > \" ' \\n\\n\\t tab\\r\\n\\nUnicode: Café • ★ λ σ\n\nEmoji: 🙂";
+    let pdf_path = tmp_path("special.pdf");
+    typepress::render_markdown_to_pdf(md, &pdf_path, &[], &[], None, None).unwrap();
+    assert!(pdf_path.exists());
+    let _ = std::fs::remove_file(&pdf_path);
+}
+
+#[test]
+fn test_negative_very_long_content() {
+    let mut md = String::from("# Long Document\n\n");
+    for i in 0..50 {
+        md.push_str(&format!("## Section {}\n\n", i));
+        md.push_str(&"Long paragraph with lots of text. ".repeat(50));
+        md.push_str("\n\n");
+    }
+    let pdf_path = tmp_path("long.pdf");
+    typepress::render_markdown_to_pdf(&md, &pdf_path, &[], &[], None, None).unwrap();
+    assert!(pdf_path.exists());
+    let _ = std::fs::remove_file(&pdf_path);
+}
+
+#[test]
+fn test_highlight_empty_code_blocks() {
+    let md = "# Code\n\n```python\n\n```\n\n```rust\n// only a comment\n```";
+    let pdf_path = tmp_path("empty_code.pdf");
+    typepress::render_markdown_to_pdf(md, &pdf_path, &[], &[], None, None).unwrap();
+    assert!(pdf_path.exists());
+    let _ = std::fs::remove_file(&pdf_path);
+}
+
 // ── PDF quality tests ───────────────────────────────────────────────────
 
 #[test]

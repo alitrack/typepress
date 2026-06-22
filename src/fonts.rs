@@ -164,3 +164,39 @@ pub fn scan_font_dir(dir: &Path) -> Vec<PathBuf> {
     }
     fonts
 }
+
+/// Discover system font directories for automatic CJK and general font discovery.
+/// Returns a list of paths to scan — caller should call scan_font_dir on each.
+#[allow(dead_code)]
+pub fn system_font_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+
+    #[cfg(target_os = "linux")]
+    {
+        paths.push(PathBuf::from("/usr/share/fonts"));
+        paths.push(PathBuf::from("/usr/local/share/fonts"));
+        if let Ok(home) = std::env::var("HOME") {
+            paths.push(PathBuf::from(&home).join(".local/share/fonts"));
+            paths.push(PathBuf::from(&home).join(".fonts"));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            paths.push(PathBuf::from(&home).join("Library/Fonts"));
+        }
+        paths.push(PathBuf::from("/Library/Fonts"));
+        paths.push(PathBuf::from("/System/Library/Fonts"));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        paths.push(PathBuf::from("C:\\Windows\\Fonts"));
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            paths.push(PathBuf::from(&local).join("Microsoft\\Windows\\Fonts"));
+        }
+    }
+
+    paths
+}

@@ -18,10 +18,8 @@ regex = "1"
 mermaid-rs = { version = "0.1", path = "../mermaid-rs" }
 # Markdown input
 pulldown-cmark = "0.13"
-# Multi-format output (SVG/PNG)
-resvg = "0.45"
+# Multi-format output (PNG rasterization)
 tiny-skia = "0.11"
-usvg = "0.45"
 # Error handling
 anyhow = "1"
 tempfile = "3"
@@ -37,3 +35,12 @@ syntect = "5"
 # Logging
 log = "0.4"
 env_logger = "0.11"
+
+[profile.release]
+lto = true
+strip = true
+opt-level = 3
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"

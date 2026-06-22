@@ -10,7 +10,22 @@ use syntect::html::highlighted_html_for_string;
 use syntect::parsing::SyntaxSet;
 
 /// Highlight code blocks in HTML. Uses syntect for syntax coloring.
+/// Falls back to plain output on panic (e.g. malformed HTML).
 pub fn highlight_code_blocks(html: &mut String) -> Result<usize> {
+    let html_ptr = html as *mut String;
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        highlight_code_blocks_inner(unsafe { &mut *html_ptr })
+    }));
+    match result {
+        Ok(r) => r,
+        Err(_) => {
+            eprintln!("Warning: syntax highlighting panicked, falling back to plain code blocks");
+            Ok(0)
+        }
+    }
+}
+
+fn highlight_code_blocks_inner(html: &mut String) -> Result<usize> {
     let ss = SyntaxSet::load_defaults_newlines();
     let ts = ThemeSet::load_defaults();
     let theme = &ts.themes["base16-ocean.dark"];
