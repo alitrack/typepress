@@ -15,7 +15,7 @@ clap = { version = "4", features = ["derive"] }
 katex = { package = "katex-rs", version = "0.2" }
 # Regex for math detection
 regex = "1"
-mermaid-rs = { path = "../mermaid-rs" }
+mermaid-rs = { version = "0.1", path = "../mermaid-rs" }
 # Markdown input
 pulldown-cmark = "0.13"
 # Multi-format output (SVG/PNG)
