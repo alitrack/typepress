@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 mod config;
 mod svg;
+mod fonts;
 use config::TypePressConfig;
 
 // ── CLI ────────────────────────────────────────────────────────────────
@@ -539,10 +540,7 @@ fn main() -> Result<()> {
         .map_or(false, |e| e == "pdf");
     if is_pdf_input && !cli.stdin {
         let pdf_bytes = std::fs::read(input_file.as_ref().unwrap())?;
-        let to_stdout = cli
-            .output
-            .as_ref()
-            .map_or(false, |o| o.as_os_str() == "-");
+        let to_stdout = cli.output.as_ref().map_or(false, |o| o.as_os_str() == "-");
         if to_stdout {
             match cli.format.as_str() {
                 "svg" => print!("{}", render_svg_from_pdf(&pdf_bytes)?),
@@ -631,11 +629,39 @@ fn main() -> Result<()> {
         }
     }
 
-    // 3. Build asset bundle
+    // 3. Build asset bundle — start with @font-face font resolution
+    let mut font_face_paths: Vec<PathBuf> = Vec::new();
+
+    // Parse @font-face from inline styles in the HTML
+    for ff in fonts::extract_font_faces_from_html(&html) {
+        match fonts::resolve_font_path(&ff.src_url, base_path.as_deref()) {
+            Ok(path) => font_face_paths.push(path),
+            Err(e) => eprintln!("Warning: @font-face '{}': {e}", ff.family),
+        }
+    }
+
+    // Parse @font-face from external CSS files
+    for css_path in &cli.css_files {
+        if let Ok(css_content) = std::fs::read_to_string(css_path) {
+            for ff in fonts::parse_font_faces(&css_content) {
+                let css_dir = css_path.parent();
+                match fonts::resolve_font_path(&ff.src_url, css_dir.or(base_path.as_deref())) {
+                    Ok(path) => font_face_paths.push(path),
+                    Err(e) => eprintln!(
+                        "Warning: @font-face '{}' in {}: {e}",
+                        ff.family,
+                        css_path.display()
+                    ),
+                }
+            }
+        }
+    }
+
     let needs_assets = !cli.fonts.is_empty()
         || !cli.css_files.is_empty()
         || header_css.is_some()
-        || !math_fonts.is_empty();
+        || !math_fonts.is_empty()
+        || !font_face_paths.is_empty();
 
     let assets = if needs_assets {
         let mut bundle = AssetBundle::new();
@@ -656,6 +682,11 @@ fn main() -> Result<()> {
             bundle
                 .add_css_file(f)
                 .unwrap_or_else(|e| eprintln!("Warning: CSS {}: {e}", f.display()));
+        }
+        for f in &font_face_paths {
+            bundle
+                .add_font_file(f)
+                .unwrap_or_else(|e| eprintln!("Warning: @font-face font {}: {e}", f.display()));
         }
         Some(bundle)
     } else {
