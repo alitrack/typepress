@@ -30,6 +30,11 @@ struct Cli {
     #[arg(short, long)]
     output: PathBuf,
 
+    // ── Input format ──
+    /// Input format: html (default) or md (markdown)
+    #[arg(long = "from", default_value = "html")]
+    from: String,
+
     // ── Page ──
     /// Page size: A4, Letter, A3, etc.
     #[arg(short, long)]
@@ -128,6 +133,16 @@ fn parse_margin(s: &str) -> Margin {
         },
         _ => Margin::default(),
     }
+}
+
+// ── Markdown Processing ────────────────────────────────────────────────
+
+fn process_markdown(input: &str) -> String {
+    use pulldown_cmark::{html, Parser};
+    let parser = Parser::new(input);
+    let mut html_output = String::new();
+    html::push_html(&mut html_output, parser);
+    format!("<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"></head><body>\n{html_output}\n</body></html>")
 }
 
 // ── Math Processing ────────────────────────────────────────────────────
@@ -424,6 +439,23 @@ fn main() -> Result<()> {
 
     let mut html = read_input(cli.input.as_ref(), cli.stdin)?;
 
+    // 0a. Process Mermaid diagrams (before markdown→HTML conversion,
+    // since mermaid blocks are markdown syntax, not HTML)
+    let is_md = cli.from == "md"
+        || cli.input.as_ref().and_then(|p| p.extension()).map_or(false, |e| e == "md");
+    if is_md {
+        match process_mermaid(&mut html) {
+            Ok(n) if n > 0 => eprintln!("Rendered {n} mermaid diagram(s)"),
+            Err(e) => eprintln!("Warning: mermaid processing failed: {e}"),
+            _ => {}
+        }
+    }
+
+    // 0b. Convert markdown to HTML
+    if is_md {
+        html = process_markdown(&html);
+    }
+
     // 1. Inject header/footer
     let header_css = inject_header_footer(&mut html, cli.header.as_deref(), cli.footer.as_deref());
 
@@ -455,11 +487,13 @@ fn main() -> Result<()> {
         _ => {}
     }
 
-    // 2b. Process Mermaid diagrams
-    match process_mermaid(&mut html) {
-        Ok(n) if n > 0 => eprintln!("Rendered {n} mermaid diagram(s)"),
-        Err(e) => eprintln!("Warning: mermaid processing failed: {e}"),
-        _ => {}
+    // 2b. Process Mermaid diagrams (HTML input; MD already done in step 0a)
+    if !is_md {
+        match process_mermaid(&mut html) {
+            Ok(n) if n > 0 => eprintln!("Rendered {n} mermaid diagram(s)"),
+            Err(e) => eprintln!("Warning: mermaid processing failed: {e}"),
+            _ => {}
+        }
     }
 
     // 3. Build asset bundle

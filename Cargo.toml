@@ -16,6 +16,8 @@ katex = { package = "katex-rs", version = "0.2" }
 # Regex for math detection
 regex = "1"
 mermaid-rs = { path = "../mermaid-rs" }
+# Markdown input
+pulldown-cmark = "0.13"
 # Error handling
 anyhow = "1"
 # Logging
