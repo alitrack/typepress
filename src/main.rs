@@ -208,7 +208,7 @@ fn process_math(html: &mut String) -> Result<usize> {
         let plain = strip_tags_re.replace_all(&rendered, "").to_string();
         html.replace_range(
             range,
-            &format!("<span class=\"katex-display\">{plain}</span>"),
+            &format!("<span class=\"katex-display\" style=\"font-family:DejaVuSerif,serif\">{plain}</span>"),
         );
         *count += 1;
     }
@@ -228,7 +228,7 @@ fn process_math(html: &mut String) -> Result<usize> {
         let plain = strip_tags_re.replace_all(&rendered, "").to_string();
         html.replace_range(
             range,
-            &format!("<span class=\"katex-inline\">{plain}</span>"),
+            &format!("<font face=\"DejaVuSerif\"><span class=\"katex-inline\">{plain}</span></font>"),
         );
         *count += 1;
     }
@@ -264,24 +264,75 @@ fn process_mermaid(html: &mut String, output_dir: Option<&Path>) -> Result<usize
     for (range, source) in matches.into_iter().rev() {
         let style = mermaid_rs::DiagramStyle::default();
         match render_diagram(&source, &style, &mut EstimatedMeasure) {
-            Ok((svg, _w, _h)) => {
-                // Save SVG to file alongside output
+            Ok((svg, w, h)) => {
+                let svg_w = w.max(100.0);
+                let svg_h = h.max(100.0);
+                let png_name = if count == 0 {
+                    "diagram.png".to_string()
+                } else {
+                    format!("diagram_{count}.png")
+                };
                 let svg_name = if count == 0 {
                     "diagram.svg".to_string()
                 } else {
                     format!("diagram_{count}.svg")
                 };
+
                 if let Some(dir) = output_dir {
                     let svg_path = dir.join(&svg_name);
-                    if let Err(e) = std::fs::write(&svg_path, &svg) {
-                        eprintln!("Warning: failed to write mermaid SVG to {}: {e}", svg_path.display());
+                    let png_path = dir.join(&png_name);
+
+                    // Save SVG for reference (wrapped in proper <svg> document for resvg compatibility)
+                    // mermaid-rs outputs SVG fragments without root <svg> element
+                    let svg_doc = format!(
+                        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}">{svg}</svg>"#
+                    );
+                    if let Err(e) = std::fs::write(&svg_path, &svg_doc) {
+                        eprintln!(
+                            "Warning: failed to write mermaid SVG to {}: {e}",
+                            svg_path.display()
+                        );
                     }
+
+                    // Convert SVG to PNG using resvg CLI (pure Rust SVG renderer)
+                    match std::process::Command::new("resvg")
+                        .arg(&svg_path)
+                        .arg(&png_path)
+                        .output()
+                    {
+                        Ok(out) if out.status.success() => {
+                            // PNG generated successfully — embed as <img> tag
+                            let img_html = format!(
+                                r#"<div style="text-align:center;margin:1em 0"><img src="{}" alt="Mermaid diagram" style="max-width:100%;height:auto"/></div>"#,
+                                png_path.display()
+                            );
+                            html.replace_range(range, &img_html);
+                        }
+                        Ok(out) => {
+                            let stderr = String::from_utf8_lossy(&out.stderr);
+                            eprintln!("Warning: resvg failed for {}: {stderr}", svg_path.display());
+                            // Fallback to placeholder
+                            let fallback = format!(
+                                r#"<div class="mermaid-placeholder" style="border:2px dashed #ccc;padding:2em;text-align:center;margin:1em 0;color:#888;font-style:italic">Mermaid diagram → {svg_name}</div>"#
+                            );
+                            html.replace_range(range, &fallback);
+                        }
+                        Err(e) => {
+                            eprintln!("Warning: resvg not found for {}: {e}", svg_path.display());
+                            // Fallback to placeholder
+                            let fallback = format!(
+                                r#"<div class="mermaid-placeholder" style="border:2px dashed #ccc;padding:2em;text-align:center;margin:1em 0;color:#888;font-style:italic">Mermaid diagram → {svg_name}</div>"#
+                            );
+                            html.replace_range(range, &fallback);
+                        }
+                    }
+                } else {
+                    // No output directory — fallback to placeholder
+                    let wrapped = format!(
+                        r#"<div class="mermaid-placeholder" style="border:2px dashed #ccc;padding:2em;text-align:center;margin:1em 0;color:#888;font-style:italic">Mermaid diagram → {svg_name}</div>"#
+                    );
+                    html.replace_range(range, &wrapped);
                 }
-                // Placeholder in PDF — blitz-html can't render inline SVG
-                let wrapped = format!(
-                    r#"<div class="mermaid-placeholder" style="border:2px dashed #ccc;padding:2em;text-align:center;margin:1em 0;color:#888;font-style:italic">Mermaid diagram → {svg_name}</div>"#
-                );
-                html.replace_range(range, &wrapped);
                 count += 1;
             }
             Err(e) => eprintln!("Warning: mermaid render failed: {e}"),
@@ -292,6 +343,35 @@ fn process_mermaid(html: &mut String, output_dir: Option<&Path>) -> Result<usize
 }
 
 // ── Font Scanning ──────────────────────────────────────────────────────
+
+/// Auto-detect a math-capable system font (DejaVu Serif, Liberation Serif, etc.)
+/// that contains glyphs for mathematical symbols (∫, ∇, ±, ∂, ∞, etc.).
+/// Returns (font_path, font_family_name).
+fn detect_math_system_font() -> Option<(PathBuf, String)> {
+    // Priority-ordered list of math-capable fonts available on most Linux systems
+    let candidates: &[(&str, &str)] = &[
+        ("DejaVu Serif", "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"),
+        ("DejaVu Sans", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        ("Liberation Serif", "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf"),
+        ("FreeSerif", "/usr/share/fonts/truetype/freefont/FreeSerif.ttf"),
+    ];
+    for (family, path) in candidates {
+        let p = PathBuf::from(path);
+        if p.exists() {
+            return Some((p, family.to_string()));
+        }
+    }
+    None
+}
+
+/// Generate @font-face CSS to register a math font with the name 'TypePressMath'.
+/// fulgur's extract_font_faces_from_html will pick this up and load the font file.
+fn math_font_face_css(font_path: &Path) -> String {
+    format!(
+        r#"@font-face {{ font-family: 'TypePressMath'; src: url('{}'); }}"#,
+        font_path.display()
+    )
+}
 
 
 fn auto_detect_katex_fonts() -> Option<PathBuf> {
@@ -639,6 +719,23 @@ fn main() -> Result<()> {
 
         // 1. Inject header/footer
         header_css = inject_header_footer(&mut html, header.as_deref(), footer.as_deref());
+
+        // Inject @font-face for math system font (maps 'TypePressMath' to a real font file)
+        // This must happen BEFORE extract_font_faces_from_html() so the @font-face rule
+        // is picked up and the font file is added to the AssetBundle.
+        if math_count > 0 {
+            if let Some((math_font_path, family)) = detect_math_system_font() {
+                let ff_css = math_font_face_css(&math_font_path);
+                inject_css(&mut html, &ff_css);
+                eprintln!("Math font: using {family} ({})", math_font_path.display());
+            } else {
+                eprintln!(
+                    "Warning: no math-capable system font found. \
+                     Math symbols (∫, ∇, ±, ∂, ∞) may render as empty boxes. \
+                     Install DejaVu or Liberation fonts."
+                );
+            }
+        }
     } else {
         // HTML pipeline: Header/Footer → Math → Mermaid → Highlight
         // 1. Inject header/footer

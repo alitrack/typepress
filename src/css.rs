@@ -15,9 +15,10 @@ pub const DEFAULT_PRINT_CSS: &str = r#"
 "#;
 
 /// KaTeX CSS — math formula styles. Only included when --math is active.
+/// Explicitly sets font-family to 'DejaVuSerif' — this font is auto-detected
+/// and embedded, and has full math symbol coverage (∫∇±∂∞ etc.).
 pub const KATEX_CSS: &str = r#"
-.katex-display{display:block;text-align:center;margin:1em 0}
+.katex-display{display:block;text-align:center;margin:1em 0;font-family:DejaVuSerif,serif}
 .katex-display>.katex{display:inline-block;text-align:initial}
-.katex-inline{display:inline}
-.katex{font:normal 1.21em KaTeX_Main,Times New Roman,serif;line-height:1.2;text-indent:0}
+.katex-inline{display:inline;font-family:DejaVuSerif,serif}
 "#;
