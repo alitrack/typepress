@@ -224,10 +224,13 @@ fn process_math(html: &mut String) -> Result<usize> {
     let ctx = KatexContext::default();
     let count = &mut 0usize;
 
+    // Regex to strip MathML annotation (contains raw LaTeX that pollutes PDF output)
+    let mathml_re = Regex::new(r#"<span class="katex-mathml">.*?</span>"#)?;
+
     // Display math $$...$$
     while let Some(caps) = display_re.captures(html) {
         let latex = caps.get(1).unwrap().as_str().trim();
-        let rendered = render_to_string(
+        let mut rendered = render_to_string(
             &ctx,
             latex,
             &Settings {
@@ -236,6 +239,8 @@ fn process_math(html: &mut String) -> Result<usize> {
             },
         )
         .map_err(|e| anyhow::anyhow!("katex error in display math: {e:?}"))?;
+        // Strip MathML to avoid raw LaTeX text appearing in PDF
+        rendered = mathml_re.replace(&rendered, "").to_string();
         let range = caps.get(0).unwrap().range();
         html.replace_range(
             range,
@@ -247,8 +252,10 @@ fn process_math(html: &mut String) -> Result<usize> {
     // Inline math $...$
     while let Some(caps) = inline_re.captures(html) {
         let latex = caps.get(1).unwrap().as_str().trim();
-        let rendered = render_to_string(&ctx, latex, &Settings::default())
+        let mut rendered = render_to_string(&ctx, latex, &Settings::default())
             .map_err(|e| anyhow::anyhow!("katex error in inline math: {e:?}"))?;
+        // Strip MathML
+        rendered = mathml_re.replace(&rendered, "").to_string();
         let range = caps.get(0).unwrap().range();
         html.replace_range(
             range,
@@ -269,7 +276,7 @@ fn process_math(html: &mut String) -> Result<usize> {
 
 // ── Mermaid Processing ─────────────────────────────────────────────────
 
-fn process_mermaid(html: &mut String) -> Result<usize> {
+fn process_mermaid(html: &mut String, output_dir: Option<&Path>) -> Result<usize> {
     use mermaid_rs::{EstimatedMeasure, render_diagram};
 
     let re = Regex::new(r"(?s)```mermaid\n(.*?)```")?;
@@ -291,8 +298,19 @@ fn process_mermaid(html: &mut String) -> Result<usize> {
         let style = mermaid_rs::DiagramStyle::default();
         match render_diagram(&source, &style, &mut EstimatedMeasure) {
             Ok((svg, _w, _h)) => {
+                // Save SVG to file alongside output
+                let svg_name = if count == 0 {
+                    "diagram.svg".to_string()
+                } else {
+                    format!("diagram_{count}.svg")
+                };
+                if let Some(dir) = output_dir {
+                    let svg_path = dir.join(&svg_name);
+                    let _ = std::fs::write(&svg_path, &svg);
+                }
+                // Placeholder in PDF — blitz-html can't render inline SVG
                 let wrapped = format!(
-                    "<div class=\"mermaid-diagram\" style=\"text-align:center;margin:1em 0\">{svg}</div>"
+                    r#"<div class="mermaid-placeholder" style="border:2px dashed #ccc;padding:2em;text-align:center;margin:1em 0;color:#888;font-style:italic">Mermaid diagram → {svg_name}</div>"#
                 );
                 html.replace_range(range, &wrapped);
                 count += 1;
@@ -621,26 +639,9 @@ fn main() -> Result<()> {
 
     let mut html = read_input(input_file.as_ref(), cli.stdin)?;
 
-    // 0a. Process Mermaid diagrams (before markdown→HTML conversion,
-    // since mermaid blocks are markdown syntax, not HTML)
-    if is_md {
-        match process_mermaid(&mut html) {
-            Ok(n) if n > 0 => eprintln!("Rendered {n} mermaid diagram(s)"),
-            Err(e) => eprintln!("Warning: mermaid processing failed: {e}"),
-            _ => {}
-        }
-    }
-
-    // 0b. Convert markdown to HTML
-    if is_md {
-        html = process_markdown(&html);
-    }
-
-    // 1. Inject header/footer
-    let header_css = inject_header_footer(&mut html, header.as_deref(), footer.as_deref());
-
-    // 2. Process LaTeX math
-    let math_fonts: Vec<PathBuf> = if cli.math || cli.math_dir.is_some() {
+    // ── Math font detection (before any processing) ──
+    let math_enabled = cli.math || cli.math_dir.is_some();
+    let math_fonts: Vec<PathBuf> = if math_enabled {
         let target = cli.math_dir.or_else(|| {
             if cli.math {
                 auto_detect_katex_fonts()
@@ -661,22 +662,58 @@ fn main() -> Result<()> {
         Vec::new()
     };
 
-    match process_math(&mut html) {
-        Ok(n) if n > 0 => eprintln!("Rendered {n} math expression(s)"),
-        Err(e) => eprintln!("Warning: math processing failed: {e}"),
-        _ => {}
-    }
+    let header_css;
 
-    // 2b. Process Mermaid diagrams (HTML input; MD already done in step 0a)
-    if !is_md {
-        match process_mermaid(&mut html) {
+    // Determine Mermaid SVG output directory (alongside output file or CWD)
+    let mermaid_output_dir: Option<PathBuf> = cli.output.as_ref().and_then(|o| o.parent().map(|p| p.to_path_buf()));
+
+    if is_md {
+        // MD pipeline: Mermaid → Math → Markdown→HTML → Header/Footer → Highlight
+
+        // 0a. Mermaid (raw markdown)
+        match process_mermaid(&mut html, mermaid_output_dir.as_deref()) {
+            Ok(n) if n > 0 => eprintln!("Rendered {n} mermaid diagram(s)"),
+            Err(e) => eprintln!("Warning: mermaid processing failed: {e}"),
+            _ => {}
+        }
+
+        // 0b. Math (raw markdown — pre-empts pulldown-cmark's ENABLE_MATH)
+        if math_enabled {
+            match process_math(&mut html) {
+                Ok(n) if n > 0 => eprintln!("Rendered {n} math expression(s)"),
+                Err(e) => eprintln!("Warning: math processing failed: {e}"),
+                _ => {}
+            }
+        }
+
+        // 0c. Convert markdown to HTML
+        html = process_markdown(&html);
+
+        // 1. Inject header/footer
+        header_css = inject_header_footer(&mut html, header.as_deref(), footer.as_deref());
+    } else {
+        // HTML pipeline: Header/Footer → Math → Mermaid → Highlight
+        // 1. Inject header/footer
+        header_css = inject_header_footer(&mut html, header.as_deref(), footer.as_deref());
+
+        // 2. Math
+        if math_enabled {
+            match process_math(&mut html) {
+                Ok(n) if n > 0 => eprintln!("Rendered {n} math expression(s)"),
+                Err(e) => eprintln!("Warning: math processing failed: {e}"),
+                _ => {}
+            }
+        }
+
+        // 3. Mermaid
+        match process_mermaid(&mut html, mermaid_output_dir.as_deref()) {
             Ok(n) if n > 0 => eprintln!("Rendered {n} mermaid diagram(s)"),
             Err(e) => eprintln!("Warning: mermaid processing failed: {e}"),
             _ => {}
         }
     }
 
-    // 2c. Apply code syntax highlighting (syntect)
+    // 4. Apply code syntax highlighting (syntect)
     match highlight::highlight_code_blocks(&mut html) {
         Ok(n) if n > 0 => eprintln!("Highlighted {n} code block(s)"),
         Err(e) => eprintln!("Warning: code highlighting failed: {e}"),
