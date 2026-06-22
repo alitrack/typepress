@@ -14,7 +14,13 @@ pub use css::DEFAULT_PRINT_CSS;
 
 /// Convert Markdown to HTML with GFM extensions and print CSS.
 /// Returns a complete HTML document ready for fulgur rendering.
+/// Extra CSS is appended to the default print stylesheet (e.g. KATEX_CSS for math).
 pub fn markdown_to_html(input: &str) -> String {
+    markdown_to_html_with_css(input, "")
+}
+
+/// Same as markdown_to_html but with an extra CSS string appended to the stylesheet.
+pub fn markdown_to_html_with_css(input: &str, extra_css: &str) -> String {
     use pulldown_cmark::{html, Options, Parser};
     let options = Options::all();
     let parser = Parser::new_ext(input, options);
@@ -22,8 +28,9 @@ pub fn markdown_to_html(input: &str) -> String {
     html::push_html(&mut html_output, parser);
     // Fix self-closing tags that Blitz/fulgur doesn't understand
     let html_output = html_output.replace(" />", ">");
+    let combined_css = format!("{DEFAULT_PRINT_CSS}{extra_css}");
     format!(
-        "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><style>{DEFAULT_PRINT_CSS}</style></head><body>\n{html_output}\n</body></html>"
+        "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><style>{combined_css}</style></head><body>\n{html_output}\n</body></html>"
     )
 }
 

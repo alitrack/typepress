@@ -19,6 +19,7 @@ mod svg;
 mod fonts;
 use config::TypePressConfig;
 use typepress::{markdown_to_html, inject_header_footer};
+use typepress::css::KATEX_CSS;
 
 // ── CLI ────────────────────────────────────────────────────────────────
 
@@ -163,31 +164,6 @@ fn parse_margin(s: &str) -> Margin {
 // ── Math Processing ────────────────────────────────────────────────────
 
 const ESCAPED_PLACEHOLDER: &str = "\x00TXP_ESC_DOLLAR\x00";
-
-const KATEX_CSS: &str = r#"
-.katex-display{display:block;text-align:center;margin:1em 0}
-.katex-display>.katex{display:inline-block;text-align:initial}
-.katex-inline{display:inline}
-.katex{font:normal 1.21em KaTeX_Main,Times New Roman,serif;line-height:1.2;text-indent:0}
-.katex .mathrm,.katex .textrm,.katex .text,.katex .textnormal,.katex .textmd{font-family:KaTeX_Main}
-.katex .mathit,.katex .textit{font-family:KaTeX_Math;font-style:italic}
-.katex .mathbf,.katex .textbf,.katex .textbold{font-family:KaTeX_Main;font-weight:bold}
-.katex .amsrm,.katex .mathbb,.katex .textbb{font-family:KaTeX_AMS}
-.katex .mathcal,.katex .textcal{font-family:KaTeX_Caligraphic}
-.katex .mathfrak,.katex .textfrak{font-family:KaTeX_Fraktur}
-.katex .mathtt,.katex .texttt{font-family:KaTeX_Typewriter}
-.katex .mathscr,.katex .textscr{font-family:KaTeX_Script}
-.katex .mathsf,.katex .textsf{font-family:KaTeX_SansSerif}
-.katex .mathnormal{font-family:KaTeX_Math;font-style:italic}
-.katex .mainrm{font-family:KaTeX_Main;font-style:normal}
-.katex .delimsizing.size1{font-family:KaTeX_Size1}
-.katex .delimsizing.size2{font-family:KaTeX_Size2}
-.katex .delimsizing.size3{font-family:KaTeX_Size3}
-.katex .delimsizing.size4{font-family:KaTeX_Size4}
-.katex .op-symbol{font-family:KaTeX_Size1}
-.katex .op-symbol.large-op{font-family:KaTeX_Size2}
-.katex .accent-body{font-family:KaTeX_Main}
-"#;
 
 fn process_math(html: &mut String) -> Result<usize> {
     use katex::{KatexContext, Settings, render_to_string};
@@ -619,6 +595,8 @@ fn main() -> Result<()> {
         Vec::new()
     };
 
+    let mut math_count = 0usize;
+
     let header_css;
 
     // Determine Mermaid SVG output directory (alongside output file or CWD)
@@ -635,7 +613,7 @@ fn main() -> Result<()> {
         }
 
         // 0b. Math (raw markdown — pre-empts pulldown-cmark's ENABLE_MATH)
-        let math_count = if math_enabled {
+        math_count = if math_enabled {
             match process_math(&mut html) {
                 Ok(n) => {
                     if n > 0 {
@@ -653,12 +631,11 @@ fn main() -> Result<()> {
         };
 
         // 0c. Convert markdown to HTML
-        html = markdown_to_html(&html);
-
-        // Inject KaTeX CSS after HTML wrapping (needs </head> tag)
-        if math_enabled && math_count > 0 {
-            inject_css(&mut html, KATEX_CSS);
-        }
+        html = if math_count > 0 {
+            typepress::markdown_to_html_with_css(&html, KATEX_CSS)
+        } else {
+            markdown_to_html(&html)
+        };
 
         // 1. Inject header/footer
         header_css = inject_header_footer(&mut html, header.as_deref(), footer.as_deref());

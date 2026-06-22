@@ -13,3 +13,11 @@ pub const DEFAULT_PRINT_CSS: &str = r#"
     thead { display: table-header-group; }
     h2, h3 { break-after: avoid; page-break-after: avoid; }
 "#;
+
+/// KaTeX CSS — math formula styles. Only included when --math is active.
+pub const KATEX_CSS: &str = r#"
+.katex-display{display:block;text-align:center;margin:1em 0}
+.katex-display>.katex{display:inline-block;text-align:initial}
+.katex-inline{display:inline}
+.katex{font:normal 1.21em KaTeX_Main,Times New Roman,serif;line-height:1.2;text-indent:0}
+"#;
