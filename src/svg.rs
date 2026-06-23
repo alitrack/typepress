@@ -212,12 +212,7 @@ fn decode_with_cmap(bytes: &[u8], cmap: &CidMap) -> String {
 
     // Auto-detect interleaved format: if all odd-indexed pairs have
     // the same value (consistent advance), skip them as adjustments.
-    let interleaved = pairs.len() >= 4
-        && pairs
-            .iter()
-            .skip(1)
-            .step_by(2)
-            .all(|&v| v == pairs[1]);
+    let interleaved = pairs.len() >= 4 && pairs.iter().skip(1).step_by(2).all(|&v| v == pairs[1]);
 
     let mut result = String::new();
     for (i, &cid) in pairs.iter().enumerate() {

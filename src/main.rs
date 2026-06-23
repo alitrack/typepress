@@ -24,7 +24,11 @@ use typepress::{inject_header_footer, markdown_to_html};
 // ── CLI ────────────────────────────────────────────────────────────────
 
 #[derive(Parser)]
-#[command(name = "typepress", version, about = "Pure Rust HTML/CSS → PDF engine\n\nwkhtmltopdf compatible — use as a drop-in replacement.")]
+#[command(
+    name = "typepress",
+    version,
+    about = "Pure Rust HTML/CSS → PDF engine\n\nwkhtmltopdf compatible — use as a drop-in replacement."
+)]
 struct Cli {
     /// Input HTML file (omit for --stdin)
     input: Option<PathBuf>,
@@ -119,27 +123,51 @@ impl Cli {
             || self.margin_left.is_some()
             || self.margin_right.is_some();
         if has_side {
-            let top = self.margin_top.as_deref().and_then(|s| parse_length_mm(s).ok()).unwrap_or(20.0);
-            let bottom = self.margin_bottom.as_deref().and_then(|s| parse_length_mm(s).ok()).unwrap_or(20.0);
-            let left = self.margin_left.as_deref().and_then(|s| parse_length_mm(s).ok()).unwrap_or(10.0);
-            let right = self.margin_right.as_deref().and_then(|s| parse_length_mm(s).ok()).unwrap_or(10.0);
+            let top = self
+                .margin_top
+                .as_deref()
+                .and_then(|s| parse_length_mm(s).ok())
+                .unwrap_or(20.0);
+            let bottom = self
+                .margin_bottom
+                .as_deref()
+                .and_then(|s| parse_length_mm(s).ok())
+                .unwrap_or(20.0);
+            let left = self
+                .margin_left
+                .as_deref()
+                .and_then(|s| parse_length_mm(s).ok())
+                .unwrap_or(10.0);
+            let right = self
+                .margin_right
+                .as_deref()
+                .and_then(|s| parse_length_mm(s).ok())
+                .unwrap_or(10.0);
             let to_pt = |mm: f32| mm * 72.0 / 25.4;
-            return Some(Margin { top: to_pt(top), bottom: to_pt(bottom), left: to_pt(left), right: to_pt(right) });
+            return Some(Margin {
+                top: to_pt(top),
+                bottom: to_pt(bottom),
+                left: to_pt(left),
+                right: to_pt(right),
+            });
         }
         self.margin.as_deref().map(parse_margin)
     }
     fn resolve_landscape(&self) -> bool {
         if let Some(ref o) = self.orientation {
             o.eq_ignore_ascii_case("landscape")
-        } else { self.landscape }
+        } else {
+            self.landscape
+        }
     }
     fn resolve_size(&self) -> Option<String> {
         if let (Some(w), Some(h)) = (self.page_width.as_ref(), self.page_height.as_ref()) {
             Some(format!("{} {}", w, h))
-        } else { self.size.clone() }
+        } else {
+            self.size.clone()
+        }
     }
 }
-
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -164,10 +192,8 @@ fn parse_page_size(s: &str) -> PageSize {
 }
 
 fn parse_margin(s: &str) -> Margin {
-    let values: Vec<std::result::Result<f32, _>> = s
-        .split_whitespace()
-        .map(parse_length_mm)
-        .collect();
+    let values: Vec<std::result::Result<f32, _>> =
+        s.split_whitespace().map(parse_length_mm).collect();
     if values.is_empty() || values.iter().all(|v| v.is_err()) {
         return Margin::default();
     }
@@ -200,16 +226,32 @@ fn parse_length_mm(s: &str) -> std::result::Result<f32, &'static str> {
         return val.trim().parse::<f32>().map_err(|_| "invalid mm");
     }
     if let Some(val) = s.strip_suffix("cm") {
-        return val.trim().parse::<f32>().map(|v| v * 10.0).map_err(|_| "invalid cm");
+        return val
+            .trim()
+            .parse::<f32>()
+            .map(|v| v * 10.0)
+            .map_err(|_| "invalid cm");
     }
     if let Some(val) = s.strip_suffix("in") {
-        return val.trim().parse::<f32>().map(|v| v * 25.4).map_err(|_| "invalid in");
+        return val
+            .trim()
+            .parse::<f32>()
+            .map(|v| v * 25.4)
+            .map_err(|_| "invalid in");
     }
     if let Some(val) = s.strip_suffix("pt") {
-        return val.trim().parse::<f32>().map(|v| v * 25.4 / 72.0).map_err(|_| "invalid pt");
+        return val
+            .trim()
+            .parse::<f32>()
+            .map(|v| v * 25.4 / 72.0)
+            .map_err(|_| "invalid pt");
     }
     if let Some(val) = s.strip_suffix("px") {
-        return val.trim().parse::<f32>().map(|v| v * 25.4 / 96.0).map_err(|_| "invalid px");
+        return val
+            .trim()
+            .parse::<f32>()
+            .map(|v| v * 25.4 / 96.0)
+            .map_err(|_| "invalid px");
     }
     // Plain number → treat as mm
     s.parse::<f32>().map_err(|_| "invalid number")
@@ -1384,9 +1426,7 @@ fn main() -> Result<()> {
             {
                 builder = builder.page_size(parse_page_size(size));
             }
-            if !resolved_landscape
-                && let Some(ls) = pc.landscape
-            {
+            if !resolved_landscape && let Some(ls) = pc.landscape {
                 builder = builder.landscape(ls);
             }
             if resolved_margin.is_none()
