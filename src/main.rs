@@ -69,6 +69,11 @@ struct Cli {
     #[arg(long)]
     margin: Option<String>,
 
+    /// Fit content to one page by uniform CSS scaling.
+    /// Renders first, counts pages, then globally scales CSS px values.
+    #[arg(long)]
+    fit: bool,
+
     // ── Metadata ──
     #[arg(long)]
     title: Option<String>,
@@ -1374,7 +1379,23 @@ fn main() -> Result<()> {
     }
 
     let engine = builder.build();
-    let pdf = engine.render_html(&html)?;
+    let mut pdf = engine.render_html(&html)?;
+
+    // --fit: if multi-page, scale CSS uniformly and re-render
+    if cli.fit {
+        let pages = typepress::css_layout::count_pdf_pages(&pdf);
+        if pages > 1 {
+            let scale = 0.95 / pages as f64; // 95% safety margin
+            eprintln!(
+                "Fitting {pages} pages → 1 page (scale {:.1}%)",
+                scale * 100.0
+            );
+            let scaled_html = typepress::css_layout::scale_css_for_fit(&html, scale);
+            pdf = engine.render_html(&scaled_html)?;
+            let new_pages = typepress::css_layout::count_pdf_pages(&pdf);
+            eprintln!(" → {new_pages} page(s) after fitting");
+        }
+    }
 
     // 5. Route output by format. YAML config triggers multi-format.
     let to_stdout = cli.output.as_ref().map_or(false, |o| o.as_os_str() == "-");

@@ -658,6 +658,26 @@ fn convert_flex_div_to_table(
     result
 }
 
+/// Uniformly scale all px-based CSS values in HTML to fit content on fewer pages.
+/// Returns (new_html, scale_factor).
+pub fn scale_css_for_fit(html: &str, scale: f64) -> String {
+    let re = Regex::new(r"(\d+(?:\.\d+)?)px").unwrap();
+    re.replace_all(html, |caps: &regex::Captures| {
+        let val: f64 = caps[1].parse().unwrap_or(0.0);
+        let new_val = (val * scale).round().max(1.0) as u64;
+        format!("{new_val}px")
+    })
+    .into_owned()
+}
+
+/// Count pages in a PDF byte buffer.
+pub fn count_pdf_pages(pdf: &[u8]) -> usize {
+    // Count /Type /Page minus /Type /Pages
+    let text = String::from_utf8_lossy(pdf);
+    let re = regex::Regex::new(r"/Type\s*/Page[^s]").unwrap();
+    re.find_iter(&text).count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
