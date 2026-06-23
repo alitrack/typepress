@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "typepress"
+version = "0.3.0"
+description = "Pure Rust HTML/CSS → PDF engine — Python binding"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.8"
+authors = [
+    { name = "TypePress Contributors" },
+]
+keywords = ["pdf", "html-to-pdf", "typesetting", "rust"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Text Processing",
+    "Topic :: Printing",
+]
+
+[project.urls]
+Homepage = "https://github.com/alitrack/typepress"
+Repository = "https://github.com/alitrack/typepress"
+
+[project.scripts]
+typepress = "typepress.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["typepress"]

@@ -629,6 +629,7 @@ fn math_fallback_markup(latex: &str, display_mode: bool) -> String {
     format!(r#"<span class="{class}">{}</span>"#, escape_html(latex))
 }
 
+#[cfg(feature = "mermaid")]
 fn detect_mermaid_system_font(prefer_cjk: bool) -> Option<(PathBuf, &'static str)> {
     let cjk_candidates: &[(&str, &str)] = &[
         (
@@ -737,6 +738,7 @@ fn process_math(html: &mut String) -> Result<usize> {
 
 // ── Mermaid Processing ─────────────────────────────────────────────────
 
+#[cfg(feature = "mermaid")]
 fn process_mermaid(html: &mut String) -> Result<usize> {
     use mermaid_rs::{EstimatedMeasure, render_diagram};
 
@@ -1136,6 +1138,7 @@ fn main() -> Result<()> {
         // MD pipeline: Mermaid → Math → Markdown→HTML → Header/Footer → Highlight
 
         // 0a. Mermaid (raw markdown)
+        #[cfg(feature = "mermaid")]
         match process_mermaid(&mut html) {
             Ok(n) if n > 0 => eprintln!("Rendered {n} mermaid diagram(s)"),
             Err(e) => eprintln!("Warning: mermaid processing failed: {e}"),
@@ -1205,6 +1208,7 @@ fn main() -> Result<()> {
         }
 
         // 3. Mermaid
+        #[cfg(feature = "mermaid")]
         match process_mermaid(&mut html) {
             Ok(n) if n > 0 => eprintln!("Rendered {n} mermaid diagram(s)"),
             Err(e) => eprintln!("Warning: mermaid processing failed: {e}"),
@@ -1481,6 +1485,7 @@ mod preprocess_tests {
     }
 
     #[test]
+    #[cfg(feature = "mermaid")]
     fn process_mermaid_generates_inline_svg() {
         let mut markdown = String::from("```mermaid\ngraph TD\n  A --> B\n```");
         let rendered = process_mermaid(&mut markdown).unwrap();

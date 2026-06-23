@@ -1,0 +1,40 @@
+{
+  "name": "typepress",
+  "version": "0.3.0",
+  "description": "Pure Rust HTML/CSS → PDF engine — Node.js binding",
+  "license": "MIT",
+  "repository": "github:alitrack/typepress",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "bin": {
+    "typepress": "./dist/cli.js"
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "keywords": [
+    "pdf",
+    "html-to-pdf",
+    "typesetting",
+    "rust",
+    "report"
+  ]
+}

@@ -15,7 +15,8 @@ clap = { version = "4", features = ["derive"] }
 katex = { package = "katex-rs", version = "0.2" }
 # Regex for math detection
 regex = "1"
-mermaid-rs = { version = "0.1", path = "../mermaid-rs" }
+# Mermaid diagram rendering (optional)
+mermaid-rs = { version = "0.1", path = "../mermaid-rs", optional = true }
 # Markdown input
 pulldown-cmark = "0.13"
 # Multi-format output (PNG rasterization)
@@ -35,6 +36,10 @@ syntect = "5"
 # Logging
 log = "0.4"
 env_logger = "0.11"
+
+[features]
+default = []
+mermaid = ["dep:mermaid-rs"]
 
 [profile.release]
 lto = true
