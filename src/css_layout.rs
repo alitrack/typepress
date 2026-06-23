@@ -270,16 +270,20 @@ fn convert_grid_to_table(html: &str) -> String {
         };
 
         // Match the grid container in HTML
-        // The selector might be ".main-grid" or ".main-grid > *" etc.
-        // For simplicity, extract the first class selector
         let class_re = Regex::new(r"\.([\w-]+)").unwrap();
         if let Some(class_caps) = class_re.captures(&rule.selector) {
             let class_name = &class_caps[1];
-
-            // Find <div class="... class_name ..."> and convert contents to table
             result = convert_grid_div_to_table(&result, class_name, &col_widths, &table_style);
         }
     }
+
+    // Strip display:grid from <style> blocks (already converted)
+    let grid_display_re = Regex::new(r"(?m)^\s*display\s*:\s*grid\s*;?\s*$").unwrap();
+    result = grid_display_re.replace_all(&result, "").to_string();
+
+    // Also strip grid-template-columns and gap (already handled by table)
+    let grid_cols_re = Regex::new(r"(?m)^\s*grid-template-columns\s*:[^;]*;\s*$").unwrap();
+    result = grid_cols_re.replace_all(&result, "").to_string();
 
     result
 }
@@ -543,6 +547,12 @@ fn convert_flexbox_to_table(html: &str) -> String {
                 convert_flex_div_to_table(&result, class_name, &table_style, &td_style, rule.wrap);
         }
     }
+
+    // Strip display:flex and related properties from <style> blocks
+    let flex_display_re = Regex::new(r"(?m)^\s*display\s*:\s*flex\s*;?\s*$").unwrap();
+    result = flex_display_re.replace_all(&result, "").to_string();
+    let flex_wrap_re = Regex::new(r"(?m)^\s*flex-wrap\s*:[^;]*;\s*$").unwrap();
+    result = flex_wrap_re.replace_all(&result, "").to_string();
 
     result
 }
