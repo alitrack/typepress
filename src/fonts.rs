@@ -97,7 +97,7 @@ fn download_font(url: &str) -> Result<PathBuf> {
     // Determine filename from URL path
     let filename = parsed
         .path_segments()
-        .and_then(|mut s| s.next_back())
+        .and_then(|s| s.last())
         .unwrap_or("font.ttf");
     let filename = if filename.contains('.') {
         filename.to_string()

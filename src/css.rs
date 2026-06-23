@@ -21,6 +21,9 @@ pub const DEFAULT_PRINT_CSS: &str = r#"
 /// Instead, math is converted to a simpler HTML structure that preserves the
 /// key layouts we can render reliably: scripts, fractions, radicals, matrices,
 /// and over/under annotations.
+///
+/// v0.4: Replaced display:inline-flex/inline-block with inline-table
+/// fallbacks because taffy (layout engine) does not support Flexbox.
 pub const KATEX_CSS: &str = r#"
 .txp-math{font-family:'TypePressMath','DejaVu Serif',serif;line-height:1.2}
 .txp-math-inline{display:inline}
@@ -28,25 +31,31 @@ pub const KATEX_CSS: &str = r#"
 .txp-math sup{font-size:.7em;vertical-align:.6em}
 .txp-math sub{font-size:.7em;vertical-align:-.25em}
 .txp-script-sup{font-size:.6em;vertical-align:.55em}
-.txp-op-limits{display:inline-flex;flex-direction:column;align-items:center;vertical-align:middle;line-height:1;margin-right:.08em}
-.txp-op-over,.txp-op-under{font-size:.45em;line-height:1}
+.txp-op-limits{display:inline-table;vertical-align:middle;line-height:1;margin-right:.08em}
+.txp-op-over,.txp-op-under{font-size:.45em;line-height:1;display:table-row}
 .txp-op-base{line-height:.85}
-.txp-script-pair{display:inline-flex;align-items:flex-start;gap:.04em;vertical-align:middle}
+.txp-script-pair{display:inline-table;vertical-align:top}
+.txp-script-pair td{padding:0}
 .txp-script-base{line-height:1}
-.txp-script-stack{display:inline-flex;flex-direction:column;line-height:.8;font-size:.6em}
-.txp-script-over{display:block}
-.txp-script-under{display:block;margin-top:.55em}
-.txp-frac{display:inline-block;vertical-align:middle;text-align:center;line-height:1;margin:0 .15em}
-.txp-frac-num{display:block;padding:0 .2em .08em;border-bottom:.04em solid currentColor}
-.txp-frac-den{display:block;padding:.08em .2em 0}
-.txp-sqrt{display:inline-flex;align-items:flex-start;vertical-align:middle}
-.txp-sqrt-glyph{font-size:1.1em;line-height:1;padding-right:.08em}
-.txp-sqrt-body{display:inline-block;border-top:.04em solid currentColor;padding:.06em .1em 0 .08em}
-.txp-root{display:inline-flex;align-items:flex-start;vertical-align:middle}
+.txp-script-stack{display:inline-table;line-height:.8;font-size:.6em}
+.txp-script-stack td{padding:0}
+.txp-script-over{display:table-row}
+.txp-script-under{display:table-row}
+.txp-frac{display:inline-table;vertical-align:middle;text-align:center;line-height:1;margin:0 .15em}
+.txp-frac td{padding:0}
+.txp-frac-num{padding:0 .2em .08em;border-bottom:.04em solid currentColor}
+.txp-frac-den{padding:.08em .2em 0}
+.txp-sqrt{display:inline-table;vertical-align:middle}
+.txp-sqrt td{padding:0}
+.txp-sqrt-glyph{font-size:1.1em;line-height:1;padding-right:.08em;vertical-align:top}
+.txp-sqrt-body{border-top:.04em solid currentColor;padding:.06em .1em 0 .08em;vertical-align:top}
+.txp-root{display:inline-table;vertical-align:top}
+.txp-root td{padding:0}
 .txp-root>sup{margin-right:-.1em}
-.txp-overunder{display:inline-flex;flex-direction:column;align-items:center;line-height:.85;vertical-align:middle}
+.txp-overunder{display:inline-table;line-height:.85;vertical-align:middle}
+.txp-overunder td{padding:0}
 .txp-overunder-base{line-height:1}
-.txp-overunder .txp-script-over,.txp-overunder .txp-script-under{font-size:.6em}
+.txp-overunder .txp-script-over,.txp-overunder .txp-script-under{font-size:.6em;display:table-row}
 .txp-matrix{display:inline-table;border-spacing:.35em .1em;vertical-align:middle;margin:0 .2em}
 .txp-matrix td{padding:0}
 .txp-menclose-box{display:inline-block;border:.04em solid currentColor;padding:.08em .2em}

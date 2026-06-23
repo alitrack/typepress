@@ -11,35 +11,15 @@ mod css_layout_tests {
     fn layout_conversion_preserves_all_concepts() {
         let output = process_css_layout(TEST_HTML);
         let concepts = [
-            "ReAct",
-            "CoT",
-            "Reflection",
-            "Plan-Execute",
-            "LoopAgent",
-            "Tool Calling",
-            "Sandbox",
-            "MCP",
-            "Structured Output",
-            "Model Routing",
-            "RAG",
-            "Vector DB",
-            "Embedding",
-            "Chunking",
-            "Memory System",
-            "Agent Evaluation",
-            "HITL",
-            "Observability",
-            "Guardrails",
-            "A2A Protocol",
-            "Computer Use",
-            "Multi-Model Fusion",
-            "Distributed Agents",
+            "ReAct", "CoT", "Reflection", "Plan-Execute", "LoopAgent",
+            "Tool Calling", "Sandbox", "MCP", "Structured Output",
+            "Model Routing", "RAG", "Vector DB", "Embedding", "Chunking",
+            "Memory System", "Agent Evaluation", "HITL", "Observability",
+            "Guardrails", "A2A Protocol", "Computer Use",
+            "Multi-Model Fusion", "Distributed Agents",
         ];
         for c in &concepts {
-            assert!(
-                output.contains(c),
-                "Concept '{c}' lost during layout conversion"
-            );
+            assert!(output.contains(c), "Concept '{c}' lost during layout conversion");
         }
     }
 
@@ -91,11 +71,7 @@ mod css_layout_tests {
 
         let pdf_bytes = std::fs::read(&tmp_pdf).unwrap();
         assert!(pdf_bytes.starts_with(b"%PDF-"), "Not a valid PDF");
-        assert!(
-            pdf_bytes.len() < 200_000,
-            "PDF too large: {}",
-            pdf_bytes.len()
-        );
+        assert!(pdf_bytes.len() < 200_000, "PDF too large: {}", pdf_bytes.len());
 
         // Count /Type /Page minus /Type /Pages
         let page_count = pdf_bytes

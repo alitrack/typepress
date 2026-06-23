@@ -303,11 +303,7 @@ fn test_negative_empty_markdown() {
     let pdf_path = tmp_path("empty.pdf");
     let result = typepress::render_markdown_to_pdf("", &pdf_path, &[], &[], None, None);
     // Empty markdown should still produce a valid PDF (just empty page)
-    assert!(
-        result.is_ok(),
-        "Empty markdown should succeed: {:?}",
-        result.err()
-    );
+    assert!(result.is_ok(), "Empty markdown should succeed: {:?}", result.err());
     assert!(pdf_path.exists());
     let _ = std::fs::remove_file(&pdf_path);
 }
@@ -318,11 +314,7 @@ fn test_negative_invalid_html_no_panic() {
     let pdf_path = tmp_path("invalid.pdf");
     // Should not panic — fulgur should handle malformed HTML gracefully
     let result = typepress::render_markdown_to_pdf(md, &pdf_path, &[], &[], None, None);
-    assert!(
-        result.is_ok(),
-        "Invalid HTML should not crash: {:?}",
-        result.err()
-    );
+    assert!(result.is_ok(), "Invalid HTML should not crash: {:?}", result.err());
     let _ = std::fs::remove_file(&pdf_path);
 }
 
@@ -337,8 +329,7 @@ fn test_negative_multiline_math_edge_cases() {
 
 #[test]
 fn test_negative_special_characters() {
-    let md =
-        "# Special Chars\n\n& < > \" ' \\n\\n\\t tab\\r\\n\\nUnicode: Café • ★ λ σ\n\nEmoji: 🙂";
+    let md = "# Special Chars\n\n& < > \" ' \\n\\n\\t tab\\r\\n\\nUnicode: Café • ★ λ σ\n\nEmoji: 🙂";
     let pdf_path = tmp_path("special.pdf");
     typepress::render_markdown_to_pdf(md, &pdf_path, &[], &[], None, None).unwrap();
     assert!(pdf_path.exists());

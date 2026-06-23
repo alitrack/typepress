@@ -152,10 +152,11 @@ impl TypePressConfig {
         let mut dir = std::env::current_dir().ok()?;
         loop {
             let candidate = dir.join("typepress.yaml");
-            if candidate.exists()
-                && let Ok(config) = Self::from_file(&candidate) {
+            if candidate.exists() {
+                if let Ok(config) = Self::from_file(&candidate) {
                     return Some((config, candidate));
                 }
+            }
             if !dir.pop() {
                 break;
             }
