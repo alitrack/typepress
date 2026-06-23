@@ -1,102 +1,109 @@
 # TypePress
 
-**Pure Rust HTML/CSS → PDF/SVG/PNG engine. No browser required.**
+**Pure Rust HTML/CSS → PDF engine. No browser required.**
 
-Powered by [fulgur](https://github.com/fulgur-rs/fulgur) (Blitz → Taffy → Krilla), TypePress adds Markdown input, LaTeX math, Mermaid diagrams, code syntax highlighting, CJK font handling, and multi-format output on top.
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-MIT)
+[![Crates.io](https://img.shields.io/crates/v/typepress.svg)](https://crates.io/crates/typepress)
+
+TypePress renders HTML and Markdown to PDF using fulgur (Blitz → Taffy → Krilla) — zero external dependencies, no Chromium, no Node.js.
 
 ## Features
 
-- **Zero system dependencies** — `cargo build --release`, drop the binary, done
-- **Markdown to PDF** — GFM tables, fenced code blocks, LaTeX math (`$...$` / `$$...$$`)
-- **Mermaid diagrams** — flowchart, sequence, class, ER, state, Gantt, pie (rendered as standalone SVG)
-- **Code highlighting** — 30+ languages via syntect (base16-ocean-dark theme)
-- **CJK fonts** — automatic font subsetting for Chinese/Japanese/Korean
-- **@font-face** — CSS web font loading with automatic download
-- **Headers & footers** — CSS GCPM running elements, 16 @page margin box positions
-- **Multi-format** — PDF (direct), SVG, PNG (with custom scale)
-- **YAML workflow config** — `typepress.yaml` with page size, margins, metadata, fonts
-- **Reftest framework** — 14 automated regression tests
+- **HTML/CSS → PDF** — Full HTML rendering with CSS styling
+- **Markdown → PDF** — GFM extensions, code highlighting via syntect
+- **LaTeX Math** — `$...$` and `$$...$$` rendered via katex-rs
+- **Mermaid Diagrams** — Flowchart, sequence, class, state, ER diagrams
+- **CJK Support** — Chinese/Japanese/Korean with automatic font subsetting
+- **Multi-Format** — PDF, SVG, PNG output
+- **CSS Grid/Flexbox → Table** — Automatic layout degradation for taffy compatibility
+- **Header/Footer** — CSS GCPM running elements
+- **@font-face** — Web font loading and embedding
+- **Small Output** — 93KB PDF vs browser screenshots (MB scale)
 
 ## Quick Start
 
+### Install
+
 ```bash
 cargo install typepress
-
-# Markdown → PDF
-typepress README.md --from md -o readme.pdf
-
-# With math rendering
-typepress paper.md --from md --math -o paper.pdf
-
-# With header/footer
-typepress report.md --from md --header "My Report" --footer "Page {page}" -o report.pdf
-
-# SVG output
-typepress doc.md --from md --format svg -o doc.svg
-
-# High-DPI PNG
-typepress doc.md --from md --format png --scale 3 -o doc.png
-
-# YAML config
-typepress -c typepress.yaml
 ```
 
-## CLI Reference
+### Basic Usage
 
-| Flag | Description |
-|------|-------------|
-| `--from md\|html` | Input format (default: html) |
-| `-o, --output` | Output path (`-` for stdout) |
-| `-F, --format pdf\|svg\|png` | Output format (default: pdf) |
-| `-s, --size A4\|Letter\|A3` | Page size |
-| `--landscape` | Landscape orientation |
-| `--margin "20"` | Page margins in mm |
-| `--font file.ttf` | Bundle font (repeatable) |
-| `--css style.css` | Include CSS (repeatable) |
-| `--header "text"` | Running header |
-| `--footer "text"` | Running footer |
-| `--math` | Enable LaTeX math rendering |
-| `--math-dir path/` | KaTeX fonts directory |
-| `-c, --config` | YAML config file |
-| `--title`, `--author`, `--language` | PDF metadata |
-| `--scale 2.0` | PNG scale factor |
+```bash
+# Markdown → PDF
+typepress doc.md -o out.pdf
 
-## YAML Config (typepress.yaml)
+# HTML → PDF with CJK font
+typepress page.html -o out.pdf -f /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
+
+# With math support
+typepress doc.md -o out.pdf --math
+
+# PDF → SVG (multi-page)
+typepress existing.pdf --format svg -o out.svg
+
+# YAML-driven workflow
+typepress render  # auto-detects typepress.yaml
+```
+
+### Configuration
+
+Create `typepress.yaml` in your project root:
 
 ```yaml
+input: doc.md
+from: md
+output:
+  pdf: out.pdf
+  svg: out.svg
 page:
   size: A4
-  margin: [20, 25, 20, 25]  # top, right, bottom, left (mm)
-
-metadata:
-  title: "My Document"
-  authors: ["Alice"]
-  language: "zh-CN"
-
-fonts:
-  - "fonts/NotoSansSC-Regular.ttf"
-  - "fonts/FiraCode-Regular.ttf"
-
-header: "TypePress"
-footer: "Page {page} of {pages}"
-
-pdf:
-  bookmarks: true
-  tagged: false
+math: true
 ```
+
+## Comparison
+
+| | TypePress | wkhtmltopdf | Puppeteer | Paper Muncher |
+|---|---|---|---|---|
+| **No browser** | ✅ | ✅ | ❌ | ❌ |
+| **Binary size** | ~15MB | ~40MB | ~300MB | ~200MB |
+| **CSS Grid** | 🟡 table fallback | ✅ | ✅ | ✅ |
+| **Math (KaTeX)** | ✅ | ❌ | ❌ | ❌ |
+| **Mermaid** | ✅ | ❌ | ❌ | ❌ |
+| **Markdown input** | ✅ | ❌ | ❌ | ❌ |
+| **Output size** | 93KB | 200KB | 2MB | varies |
 
 ## Architecture
 
 ```
-Markdown → pulldown-cmark → Math (katex-rs) → Highlight (syntect)
-    ↓
-  HTML + CSS
-    ↓
-  fulgur (Blitz DOM → Taffy layout → Krilla rendering)
-    ↓
-  PDF / SVG / PNG
+Markdown/HTML → CSS Layout Preprocess → Header/Footer → Math → Mermaid → Code Highlight → fulgur → PDF
+                                                                               ↑
+                                                                    Blitz → Taffy → Krilla
 ```
+
+- **Blitz** — HTML/CSS parsing
+- **Taffy** — CSS box layout engine
+- **Krilla** — PDF generation
+- **TypePress** — Preprocessing pipeline + CLI
+
+## Known Limitations
+
+Taffy (layout engine) does not yet support:
+- CSS Grid (`display: grid`) — automatically converted to `<table>`
+- CSS Flexbox (`display: flex`) — automatically converted to `<table>`
+- CSS gradients — degraded to solid colors
+
+These are transparent preprocess steps; your HTML renders correctly, just with simplified layout.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and workflow.
+
+TypePress follows [OpenSpec](openspec/) spec-driven development. Changes are planned in `proposal.md` → `design.md` → `specs/` → `tasks.md` before implementation.
 
 ## License
 
-Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT) at your option.
+Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
+
+Based on [fulgur](https://github.com/fulgur-org/fulgur) (MIT/Apache-2.0).

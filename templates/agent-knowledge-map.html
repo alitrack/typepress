@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Agent 开发 · 知识全景图</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --layer0: #f8f9fa;
+    --layer1: #e9ecef;
+    --border: #dee2e6;
+    --text: #212529;
+    --text-dim: #6c757d;
+    --red: #dc3545;
+    --orange: #e67e00;
+    --green: #0d7c3e;
+    --blue: #0066cc;
+    --purple: #7c3aed;
+    --pink: #d63384;
+    --cyan: #0ea5e9;
+    --teal: #0d7c3e;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 40px;
+    display: flex;
+    justify-content: center;
+  }
+
+  .canvas {
+    max-width: 1600px;
+    width: 100%;
+  }
+
+  /* =============== HEADER =============== */
+  .header {
+    text-align: center;
+    margin-bottom: 36px;
+  }
+  .header h1 {
+    font-size: 28px;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--blue), var(--purple), var(--pink));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .header p {
+    color: var(--text-dim);
+    font-size: 14px;
+    margin-top: 4px;
+  }
+
+  /* =============== LEGEND =============== */
+  .legend {
+    display: flex;
+    gap: 18px;
+    justify-content: center;
+    margin-bottom: 32px;
+    flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+  }
+  .legend-dot.paradigm { background: var(--purple); }
+  .legend-dot.framework { background: var(--blue); }
+  .legend-dot.infra { background: var(--green); }
+  .legend-dot.quality { background: var(--orange); }
+  .legend-dot.knowledge { background: var(--cyan); }
+  .legend-dot.frontier { background: var(--pink); }
+
+  /* =============== MAIN LAYOUT =============== */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 24px;
+    margin-bottom: 32px;
+  }
+
+  /* =============== EVOLUTION LADDER (left) =============== */
+  .evolution {
+    background: var(--layer0);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+  }
+  .evolution h2 {
+    font-size: 14px;
+    color: var(--text-dim);
+    margin-bottom: 20px;
+    text-align: center;
+    letter-spacing: 1px;
+  }
+  .evo-step {
+    position: relative;
+    padding: 14px 14px 14px 20px;
+    margin-bottom: 12px;
+    border-radius: 8px;
+    border-left: 3px solid;
+  }
+  .evo-step:last-child { margin-bottom: 0; }
+  .evo-step .evo-num {
+    font-size: 10px;
+    font-weight: 700;
+    margin-bottom: 2px;
+  }
+  .evo-step .evo-title {
+    font-weight: 700;
+    font-size: 14px;
+    margin-bottom: 4px;
+  }
+  .evo-step .evo-desc {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .evo-step.l1 { border-color: var(--teal); background: rgba(57,211,83,0.08); }
+  .evo-step.l1 .evo-num { color: var(--teal); }
+  .evo-step.l1 .evo-title { color: var(--teal); }
+  .evo-step.l2 { border-color: var(--cyan); background: rgba(14,165,233,0.08); }
+  .evo-step.l2 .evo-num { color: var(--cyan); }
+  .evo-step.l2 .evo-title { color: var(--cyan); }
+  .evo-step.l3 { border-color: var(--blue); background: rgba(0,102,204,0.08); }
+  .evo-step.l3 .evo-num { color: var(--blue); }
+  .evo-step.l3 .evo-title { color: var(--blue); }
+  .evo-step.l4 { border-color: var(--purple); background: rgba(124,58,237,0.08); }
+  .evo-step.l4 .evo-num { color: var(--purple); }
+  .evo-step.l4 .evo-title { color: var(--purple); }
+
+  .evo-arrow {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 14px;
+    margin: 4px 0;
+  }
+
+  /* =============== ARCHITECTURE DIAGRAM (right) =============== */
+  .arch {
+    background: var(--layer0);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+  }
+  .arch h2 {
+    font-size: 14px;
+    color: var(--text-dim);
+    margin-bottom: 20px;
+    text-align: center;
+    letter-spacing: 1px;
+  }
+
+  .arch-layer {
+    margin-bottom: 20px;
+    border-radius: 10px;
+    padding: 16px;
+    border: 1px solid;
+  }
+  .arch-layer:last-child { margin-bottom: 0; }
+
+  .arch-layer-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .arch-layer-header h3 {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .arch-layer-header .badge {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+  }
+
+  .arch-nodes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .node {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    border: 1px solid;
+    position: relative;
+  }
+
+  /* Layer colors */
+  .layer-loop {
+    border-color: var(--purple);
+    background: rgba(124,58,237,0.06);
+  }
+  .layer-loop h3 { color: var(--purple); }
+  .layer-loop .badge { background: rgba(124,58,237,0.12); color: #5b21b6; }
+  .layer-loop .node { border-color: rgba(124,58,237,0.4); color: #5b21b6; background: rgba(124,58,237,0.04); }
+
+  .layer-harness {
+    border-color: var(--blue);
+    background: rgba(0,102,204,0.06);
+  }
+  .layer-harness h3 { color: var(--blue); }
+  .layer-harness .badge { background: rgba(0,102,204,0.12); color: #004a99; }
+  .layer-harness .node { border-color: rgba(0,102,204,0.4); color: #004a99; background: rgba(0,102,204,0.04); }
+
+  .layer-knowledge {
+    border-color: var(--cyan);
+    background: rgba(14,165,233,0.06);
+  }
+  .layer-knowledge h3 { color: var(--cyan); }
+  .layer-knowledge .badge { background: rgba(14,165,233,0.12); color: #0369a1; }
+  .layer-knowledge .node { border-color: rgba(14,165,233,0.4); color: #0369a1; background: rgba(14,165,233,0.04); }
+
+  .layer-quality {
+    border-color: var(--orange);
+    background: rgba(230,126,0,0.06);
+  }
+  .layer-quality h3 { color: var(--orange); }
+  .layer-quality .badge { background: rgba(230,126,0,0.12); color: #b85c00; }
+  .layer-quality .node { border-color: rgba(230,126,0,0.4); color: #b85c00; background: rgba(230,126,0,0.04); }
+
+  .layer-frontier {
+    border-color: var(--pink);
+    background: rgba(214,51,132,0.06);
+  }
+  .layer-frontier h3 { color: var(--pink); }
+  .layer-frontier .badge { background: rgba(214,51,132,0.12); color: #9d174d; }
+  .layer-frontier .node { border-color: rgba(214,51,132,0.4); color: #9d174d; background: rgba(214,51,132,0.04); }
+
+  .layer-template {
+    border-color: var(--teal);
+    background: rgba(57,211,83,0.06);
+  }
+  .layer-template h3 { color: var(--teal); }
+  .layer-template .badge { background: rgba(57,211,83,0.12); color: #0d7c3e; }
+  .layer-template .node { border-color: rgba(57,211,83,0.4); color: #0d7c3e; background: rgba(57,211,83,0.04); }
+
+  .node.covered {
+    border-style: dashed;
+    opacity: 0.7;
+  }
+
+  /* =============== FLOW ARROWS between layers =============== */
+  .flow-connector {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 24px;
+    color: var(--text-dim);
+    font-size: 16px;
+  }
+
+  /* =============== BOTTOM: COMPLETE FLOW =============== */
+  .complete-flow {
+    background: var(--layer0);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-top: 24px;
+  }
+  .complete-flow h2 {
+    font-size: 14px;
+    color: var(--text-dim);
+    margin-bottom: 16px;
+    text-align: center;
+    letter-spacing: 1px;
+  }
+
+  .pipeline {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+    overflow-x: auto;
+    padding-bottom: 8px;
+  }
+  .pipeline-stage {
+    flex: 1;
+    min-width: 120px;
+    padding: 12px;
+    border-radius: 8px;
+    text-align: center;
+    border: 1px solid var(--border);
+  }
+  .pipeline-stage .stage-icon { font-size: 20px; margin-bottom: 6px; }
+  .pipeline-stage .stage-name { font-size: 10px; font-weight: 700; color: var(--text-dim); margin-bottom: 4px; }
+  .pipeline-stage .stage-items { font-size: 10px; color: var(--text); }
+  .pipeline-stage .stage-items span { display: block; line-height: 1.6; }
+
+  .pipeline-arrow {
+    display: flex;
+    align-items: center;
+    color: var(--text-dim);
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+
+  /* =============== RESPONSIVE =============== */
+  @media (max-width: 1200px) {
+    .main-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <!-- HEADER -->
+  <div class="header">
+    <h1>AI Agent 开发 · 知识体系全景图</h1>
+    <p>从底层决策范式到顶层自动化设计——23 个核心概念的关系图谱</p>
+  </div>
+
+  <!-- LEGEND -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot paradigm"></div> 决策范式</div>
+    <div class="legend-item"><div class="legend-dot framework"></div> 框架实现</div>
+    <div class="legend-item"><div class="legend-dot infra"></div> 基础设施</div>
+    <div class="legend-item"><div class="legend-dot knowledge"></div> 知识增强</div>
+    <div class="legend-item"><div class="legend-dot quality"></div> 质量保证</div>
+    <div class="legend-item"><div class="legend-dot frontier"></div> 前沿扩展</div>
+  </div>
+
+  <!-- MAIN: Evolution + Architecture -->
+  <div class="main-grid">
+
+    <!-- LEFT: Evolution Ladder -->
+    <div class="evolution">
+      <h2>🧬 进化四阶段</h2>
+
+      <div class="evo-step l1">
+        <div class="evo-num">LEVEL 1</div>
+        <div class="evo-title">Prompt Engineering</div>
+        <div class="evo-desc">优化单次交互的指令质量</div>
+        <div class="evo-desc" style="margin-top:4px;color:var(--teal)">CoT · ToT · System Prompt</div>
+      </div>
+      <div class="evo-arrow">▼</div>
+
+      <div class="evo-step l2">
+        <div class="evo-num">LEVEL 2</div>
+        <div class="evo-title">Context Engineering</div>
+        <div class="evo-desc">管理 Agent 能看到的信息</div>
+        <div class="evo-desc" style="margin-top:4px;color:var(--cyan)">Progressive Disclosure · Compaction<br>Context Window Mgmt</div>
+      </div>
+      <div class="evo-arrow">▼</div>
+
+      <div class="evo-step l3">
+        <div class="evo-num">LEVEL 3</div>
+        <div class="evo-title">Harness Engineering</div>
+        <div class="evo-desc">搭建完整基础设施底盘</div>
+        <div class="evo-desc" style="margin-top:4px;color:var(--blue)">Tools · Sandbox · Memory · MCP<br>Guardrails · LoopAgent</div>
+      </div>
+      <div class="evo-arrow">▼</div>
+
+      <div class="evo-step l4">
+        <div class="evo-num">LEVEL 4</div>
+        <div class="evo-title">Loop Engineering</div>
+        <div class="evo-desc">设计自动化系统取代人工</div>
+        <div class="evo-desc" style="margin-top:4px;color:var(--purple)">Automations · Worktrees · Skills<br>Sub-agents · Completion Criteria</div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Architecture Layers -->
+    <div class="arch">
+      <h2>🏗️ Agent 架构五层模型</h2>
+
+      <!-- LAYER 1: Loop Layer (top) -->
+      <div class="arch-layer layer-loop">
+        <div class="arch-layer-header">
+          <h3>🔮 循环层 Loop Layer</h3>
+          <span class="badge">决策引擎</span>
+        </div>
+        <div class="arch-nodes">
+          <span class="node">ReAct</span>
+          <span class="node">CoT / ToT</span>
+          <span class="node">Reflection</span>
+          <span class="node">Plan-Execute</span>
+          <span class="node covered">LoopAgent</span>
+          <span class="node covered">Loop Engineering</span>
+          <span class="node">Completion Criteria</span>
+          <span class="node">Sub-agent Split</span>
+        </div>
+      </div>
+
+      <div class="flow-connector">↓ 循环层调用工具，依赖基础设施层提供的执行环境 ↓</div>
+
+      <!-- LAYER 2: Harness Layer -->
+      <div class="arch-layer layer-harness">
+        <div class="arch-layer-header">
+          <h3>⚙️ 基础设施层 Harness Layer</h3>
+          <span class="badge">运行底盘</span>
+        </div>
+        <div class="arch-nodes">
+          <span class="node">Tool Calling</span>
+          <span class="node">Function Calling</span>
+          <span class="node">Sandbox</span>
+          <span class="node covered">MCP</span>
+          <span class="node">Structured Output</span>
+          <span class="node">Context Mgmt</span>
+          <span class="node">Model Routing</span>
+          <span class="node">Worktrees</span>
+          <span class="node">Automations</span>
+        </div>
+      </div>
+
+      <div class="flow-connector">↓ Harness 注入知识增强层的检索结果和记忆 ↓</div>
+
+      <!-- LAYER 3: Knowledge Layer -->
+      <div class="arch-layer layer-knowledge">
+        <div class="arch-layer-header">
+          <h3>🧠 知识增强层 Knowledge Layer</h3>
+          <span class="badge">外挂大脑</span>
+        </div>
+        <div class="arch-nodes">
+          <span class="node">RAG</span>
+          <span class="node">Vector DB</span>
+          <span class="node">Embedding</span>
+          <span class="node">Chunking</span>
+          <span class="node covered">Memory System</span>
+          <span class="node">Skills (SKILL.md)</span>
+          <span class="node">External APIs</span>
+        </div>
+      </div>
+
+      <div class="flow-connector">↓ 贯穿所有层次的横切关注点 ↓</div>
+
+      <!-- LAYER 4: Quality Layer (cross-cutting) -->
+      <div class="arch-layer layer-quality">
+        <div class="arch-layer-header">
+          <h3>🛡️ 质量保证层 Quality Layer</h3>
+          <span class="badge">横切面</span>
+        </div>
+        <div class="arch-nodes">
+          <span class="node">Agent Evaluation</span>
+          <span class="node">HITL</span>
+          <span class="node">Prompt Injection 防御</span>
+          <span class="node">Observability</span>
+          <span class="node">Token 成本监控</span>
+          <span class="node">Guardrails</span>
+          <span class="node">Error Recovery</span>
+        </div>
+      </div>
+
+      <!-- LAYER 5: Frontier Layer -->
+      <div class="arch-layer layer-frontier">
+        <div class="arch-layer-header">
+          <h3>🚀 前沿扩展层 Frontier Layer</h3>
+          <span class="badge">2026+</span>
+        </div>
+        <div class="arch-nodes">
+          <span class="node">A2A Protocol</span>
+          <span class="node">Computer Use</span>
+          <span class="node">Multi-Model Fusion</span>
+          <span class="node">Visual Agency</span>
+          <span class="node">Distributed Agents</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- BOTTOM: Complete Flow Pipeline -->
+  <div class="complete-flow">
+    <h2>⚡ Agent 请求处理全流程</h2>
+    <div class="pipeline">
+      <div class="pipeline-stage">
+        <div class="stage-icon">📥</div>
+        <div class="stage-name">INTENT</div>
+        <div class="stage-items">
+          <span>用户请求</span>
+          <span>API / Cron</span>
+          <span>Event Trigger</span>
+          <span>Automation</span>
+        </div>
+      </div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-stage">
+        <div class="stage-icon">🔍</div>
+        <div class="stage-name">CONTEXT</div>
+        <div class="stage-items">
+          <span>System Prompt</span>
+          <span>RAG 检索</span>
+          <span>Memory 注入</span>
+          <span>Skills 加载</span>
+        </div>
+      </div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-stage">
+        <div class="stage-icon">🧠</div>
+        <div class="stage-name">REASONING</div>
+        <div class="stage-items">
+          <span>ReAct Loop</span>
+          <span>CoT / ToT</span>
+          <span>Model Routing</span>
+          <span>Reflection</span>
+        </div>
+      </div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-stage">
+        <div class="stage-icon">🔧</div>
+        <div class="stage-name">ACTION</div>
+        <div class="stage-items">
+          <span>Tool Call</span>
+          <span>Sandbox Exec</span>
+          <span>Structured Output</span>
+          <span>Sub-agent Spawn</span>
+        </div>
+      </div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-stage">
+        <div class="stage-icon">👁️</div>
+        <div class="stage-name">OBSERVE</div>
+        <div class="stage-items">
+          <span>工具结果</span>
+          <span>错误信息</span>
+          <span>Token 消耗</span>
+          <span>进度保存</span>
+        </div>
+      </div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-stage">
+        <div class="stage-icon">🔄</div>
+        <div class="stage-name">ADJUST</div>
+        <div class="stage-items">
+          <span>重新规划</span>
+          <span>模型切换</span>
+          <span>Compaction</span>
+          <span>Completion?</span>
+        </div>
+      </div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-stage">
+        <div class="stage-icon">✅</div>
+        <div class="stage-name">VERIFY</div>
+        <div class="stage-items">
+          <span>Eval Check</span>
+          <span>Checker Agent</span>
+          <span>Human-in-Loop</span>
+          <span>HITL Approve</span>
+        </div>
+      </div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-stage">
+        <div class="stage-icon">📤</div>
+        <div class="stage-name">DELIVER</div>
+        <div class="stage-items">
+          <span>最终响应</span>
+          <span>文件产出</span>
+          <span>API 回调</span>
+          <span>下一个 Loop</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <div style="text-align:center; margin-top:28px; color:var(--text-dim); font-size:11px;">
+    ○ 实色节点 = 待深入 &nbsp;|&nbsp; ◌ 虚线节点 = 已覆盖 &nbsp;|&nbsp;
+    彩色边框 = 所属概念类别 &nbsp;|&nbsp; 2026-06-23
+  </div>
+
+</div>
+</body>
+</html>

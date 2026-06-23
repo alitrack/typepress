@@ -15,11 +15,11 @@ use regex::Regex;
 use std::path::{Path, PathBuf};
 
 mod config;
-mod svg;
 mod fonts;
+mod svg;
 use config::TypePressConfig;
-use typepress::{markdown_to_html, inject_header_footer};
 use typepress::css::KATEX_CSS;
+use typepress::{inject_header_footer, markdown_to_html};
 
 // ── CLI ────────────────────────────────────────────────────────────────
 
@@ -158,8 +158,6 @@ fn parse_margin(s: &str) -> Margin {
 
 // ── Markdown Processing ────────────────────────────────────────────────
 
-
-
 /// Default CSS for print/document styling injected into Markdown output.
 // ── Math Processing ────────────────────────────────────────────────────
 
@@ -215,12 +213,7 @@ fn math_dom_to_html(node: &katex::mathml_tree::MathDomNode) -> String {
     match node {
         MathDomNode::Math(math) => math_node_to_html(math),
         MathDomNode::Text(text) => escape_html(&text.text),
-        MathDomNode::Space(space) => escape_html(
-            space
-                .character
-                .as_deref()
-                .unwrap_or(" "),
-        ),
+        MathDomNode::Space(space) => escape_html(space.character.as_deref().unwrap_or(" ")),
         MathDomNode::Fragment(fragment) => math_children_to_html(&fragment.children),
     }
 }
@@ -231,13 +224,7 @@ fn math_dom_to_plain_text(node: &katex::mathml_tree::MathDomNode) -> Option<Stri
     match node {
         MathDomNode::Math(math) => math_node_to_plain_text(math),
         MathDomNode::Text(text) => Some(text.text.clone()),
-        MathDomNode::Space(space) => Some(
-            space
-                .character
-                .as_deref()
-                .unwrap_or(" ")
-                .to_string(),
-        ),
+        MathDomNode::Space(space) => Some(space.character.as_deref().unwrap_or(" ").to_string()),
         MathDomNode::Fragment(fragment) => math_children_to_plain_text(&fragment.children),
     }
 }
@@ -250,9 +237,7 @@ fn math_child_html(node: &katex::mathml_tree::MathNode, index: usize) -> String 
 }
 
 fn math_child_plain_text(node: &katex::mathml_tree::MathNode, index: usize) -> Option<String> {
-    node.children
-        .get(index)
-        .and_then(math_dom_to_plain_text)
+    node.children.get(index).and_then(math_dom_to_plain_text)
 }
 
 fn unicode_superscript_char(ch: char) -> Option<char> {
@@ -393,7 +378,19 @@ fn render_script_stack_fallback(base: &str, over: Option<&str>, under: Option<&s
 fn is_large_operator_text(text: &str) -> bool {
     matches!(
         text.trim(),
-        "∫" | "∮" | "∯" | "∰" | "∑" | "∏" | "⋂" | "⋃" | "⋁" | "⋀" | "⨀" | "⨁" | "⨂" | "⨆"
+        "∫" | "∮"
+            | "∯"
+            | "∰"
+            | "∑"
+            | "∏"
+            | "⋂"
+            | "⋃"
+            | "⋁"
+            | "⋀"
+            | "⨀"
+            | "⨁"
+            | "⨂"
+            | "⨆"
     )
 }
 
@@ -486,7 +483,9 @@ fn math_node_to_html(node: &katex::mathml_tree::MathNode) -> String {
                     return render_large_operator_limits(&base, None, Some(&sub));
                 }
             }
-            if let Some(sub_text) = math_child_plain_text(node, 1).and_then(|text| unicode_subscript(&text)) {
+            if let Some(sub_text) =
+                math_child_plain_text(node, 1).and_then(|text| unicode_subscript(&text))
+            {
                 format!("{base}{sub_text}")
             } else {
                 render_script_stack_fallback(&base, None, Some(&sub))
@@ -632,18 +631,30 @@ fn math_fallback_markup(latex: &str, display_mode: bool) -> String {
 
 fn detect_mermaid_system_font(prefer_cjk: bool) -> Option<(PathBuf, &'static str)> {
     let cjk_candidates: &[(&str, &str)] = &[
-        ("WenQuanYi Zen Hei", "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
-        ("WenQuanYi Micro Hei", "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"),
+        (
+            "WenQuanYi Zen Hei",
+            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        ),
+        (
+            "WenQuanYi Micro Hei",
+            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        ),
         ("Microsoft YaHei", "/mnt/c/Windows/Fonts/msyh.ttc"),
         ("SimSun", "/mnt/c/Windows/Fonts/simsun.ttc"),
     ];
     let latin_candidates: &[(&str, &str)] = &[
-        ("DejaVu Sans", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        (
+            "DejaVu Sans",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ),
         (
             "Liberation Sans",
             "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
         ),
-        ("WenQuanYi Zen Hei", "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
+        (
+            "WenQuanYi Zen Hei",
+            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        ),
     ];
 
     let chains: [&[(&str, &str)]; 2] = if prefer_cjk {
@@ -664,7 +675,6 @@ fn detect_mermaid_system_font(prefer_cjk: bool) -> Option<(PathBuf, &'static str
     None
 }
 
-
 fn process_math(html: &mut String) -> Result<usize> {
     *html = html.replace("\\$", ESCAPED_PLACEHOLDER);
 
@@ -676,7 +686,12 @@ fn process_math(html: &mut String) -> Result<usize> {
     // Display math $$...$$
     let display_matches: Vec<_> = display_re
         .captures_iter(html)
-        .map(|c| (c.get(0).unwrap().range(), c.get(1).unwrap().as_str().to_string()))
+        .map(|c| {
+            (
+                c.get(0).unwrap().range(),
+                c.get(1).unwrap().as_str().to_string(),
+            )
+        })
         .collect();
     for (range, latex) in display_matches.into_iter().rev() {
         let rendered = match render_math_markup(&latex, true) {
@@ -695,7 +710,12 @@ fn process_math(html: &mut String) -> Result<usize> {
     // Inline math $...$
     let inline_matches: Vec<_> = inline_re
         .captures_iter(html)
-        .map(|c| (c.get(0).unwrap().range(), c.get(1).unwrap().as_str().to_string()))
+        .map(|c| {
+            (
+                c.get(0).unwrap().range(),
+                c.get(1).unwrap().as_str().to_string(),
+            )
+        })
         .collect();
     for (range, latex) in inline_matches.into_iter().rev() {
         let rendered = match render_math_markup(&latex, false) {
@@ -772,10 +792,22 @@ fn process_mermaid(html: &mut String) -> Result<usize> {
 fn detect_math_system_font() -> Option<(PathBuf, String)> {
     // Priority-ordered list of math-capable fonts available on most Linux systems
     let candidates: &[(&str, &str)] = &[
-        ("DejaVu Serif", "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"),
-        ("DejaVu Sans", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-        ("Liberation Serif", "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf"),
-        ("FreeSerif", "/usr/share/fonts/truetype/freefont/FreeSerif.ttf"),
+        (
+            "DejaVu Serif",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+        ),
+        (
+            "DejaVu Sans",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ),
+        (
+            "Liberation Serif",
+            "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
+        ),
+        (
+            "FreeSerif",
+            "/usr/share/fonts/truetype/freefont/FreeSerif.ttf",
+        ),
     ];
     for (family, path) in candidates {
         let p = PathBuf::from(path);
@@ -794,7 +826,6 @@ fn math_font_face_css(font_path: &Path) -> String {
         font_path.display()
     )
 }
-
 
 fn auto_detect_katex_fonts() -> Option<PathBuf> {
     // 1. Common npm global locations (no subprocess, pure path check)
@@ -872,7 +903,6 @@ fn find_katex_fonts_in(dir: &Path, depth: usize, max: usize) -> Option<PathBuf> 
 }
 
 // ── Header / Footer ────────────────────────────────────────────────────
-
 
 // ── Utility ────────────────────────────────────────────────────────────
 
@@ -1061,7 +1091,10 @@ fn main() -> Result<()> {
                 "svg" => write_svg_multi(&pdf_bytes, output)?,
                 "png" => {
                     std::fs::write(output, render_png_from_pdf(&pdf_bytes, cli.scale)?)?;
-                    eprintln!("PNG written to {} (note: rasterized as text bounding boxes, not rendered text)", output.display());
+                    eprintln!(
+                        "PNG written to {} (note: rasterized as text bounding boxes, not rendered text)",
+                        output.display()
+                    );
                 }
                 _ => {
                     std::fs::write(output, &pdf_bytes)?;
@@ -1154,7 +1187,11 @@ fn main() -> Result<()> {
             }
         }
     } else {
-        // HTML pipeline: Header/Footer → Math → Mermaid → Highlight
+        // HTML pipeline: CSS Layout → Header/Footer → Math → Mermaid → Highlight
+
+        // 0a. CSS Layout preprocess: Grid/Flexbox → Table, Gradient → Solid
+        html = typepress::css_layout::process_css_layout(&html);
+
         // 1. Inject header/footer
         header_css = inject_header_footer(&mut html, header.as_deref(), footer.as_deref());
 
@@ -1349,7 +1386,10 @@ fn main() -> Result<()> {
         }
         if let Some(ref path) = oc.png {
             std::fs::write(path, render_png_from_pdf(&pdf, cli.scale)?)?;
-            eprintln!("PNG written to {} (note: rasterized as text bounding boxes, not rendered text)", path.display());
+            eprintln!(
+                "PNG written to {} (note: rasterized as text bounding boxes, not rendered text)",
+                path.display()
+            );
         }
     }
 
@@ -1368,19 +1408,23 @@ fn main() -> Result<()> {
         }
     } else if let Some(ref output) = cli.output {
         // Check if YAML already handles this specific format
-        let yaml_has_format = cfg.as_ref().and_then(|c| c.output.as_ref()).map_or(false, |oc| {
-            match cli.format.as_str() {
+        let yaml_has_format = cfg
+            .as_ref()
+            .and_then(|c| c.output.as_ref())
+            .map_or(false, |oc| match cli.format.as_str() {
                 "svg" => oc.svg.is_some(),
                 "png" => oc.png.is_some(),
                 _ => oc.pdf.is_some(),
-            }
-        });
+            });
         if !yaml_has_format {
             match cli.format.as_str() {
                 "svg" => write_svg_multi(&pdf, output)?,
                 "png" => {
                     std::fs::write(output, render_png_from_pdf(&pdf, cli.scale)?)?;
-                    eprintln!("PNG written to {} (note: rasterized as text bounding boxes, not rendered text)", output.display());
+                    eprintln!(
+                        "PNG written to {} (note: rasterized as text bounding boxes, not rendered text)",
+                        output.display()
+                    );
                 }
                 _ => {
                     std::fs::write(output, &pdf)?;
@@ -1427,7 +1471,10 @@ mod preprocess_tests {
         let mut markdown = String::from("Good $E = mc^2$ bad $$\\badcommand$$ still $x_1$.");
         let rendered = process_math(&mut markdown).unwrap();
 
-        assert_eq!(rendered, 2, "only valid expressions should count as rendered");
+        assert_eq!(
+            rendered, 2,
+            "only valid expressions should count as rendered"
+        );
         assert!(markdown.contains("mc²"));
         assert!(markdown.contains("txp-math-error"));
         assert!(markdown.contains("x₁"));

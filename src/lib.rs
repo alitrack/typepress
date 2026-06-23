@@ -2,9 +2,10 @@
 
 pub mod config;
 pub mod css;
+pub mod css_layout;
 pub mod fonts;
-pub mod svg;
 pub mod highlight;
+pub mod svg;
 
 use anyhow::Result;
 use std::path::Path;
@@ -21,7 +22,7 @@ pub fn markdown_to_html(input: &str) -> String {
 
 /// Same as markdown_to_html but with an extra CSS string appended to the stylesheet.
 pub fn markdown_to_html_with_css(input: &str, extra_css: &str) -> String {
-    use pulldown_cmark::{html, Options, Parser};
+    use pulldown_cmark::{Options, Parser, html};
     let options = Options::all();
     let parser = Parser::new_ext(input, options);
     let mut html_output = String::new();
@@ -184,7 +185,9 @@ mod tests {
 
     #[test]
     fn markdown_html_normalization_rewrites_html_void_tags_only() {
-        let html = normalize_self_closing_html_tags(r#"<img src="a.png" /><br /><polyline points="0,0 1,1" />"#);
+        let html = normalize_self_closing_html_tags(
+            r#"<img src="a.png" /><br /><polyline points="0,0 1,1" />"#,
+        );
         assert!(html.contains(r#"<img src="a.png">"#));
         assert!(html.contains("<br>"));
         assert!(html.contains(r#"<polyline points="0,0 1,1" />"#));
