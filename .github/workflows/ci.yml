@@ -45,6 +45,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: sudo apt-get update && sudo apt-get install -y libfontconfig-dev
+      - run: sudo apt-get update && sudo apt-get install -y libfontconfig-dev fonts-noto-cjk
       - uses: Swatinem/rust-cache@v2
       - run: cargo test
