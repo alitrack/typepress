@@ -82,3 +82,65 @@ jobs:
             typepress-macos-arm64.tar.gz
             typepress-windows-x86_64.zip
           generate_release_notes: true
+
+  publish-npm:
+    name: Publish to npm
+    needs: github-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if version already published
+        id: check
+        run: |
+          VER=$(node -p "require('./package.json').version")
+          PUB=$(npm view typepress version 2>/dev/null || echo "0.0.0")
+          echo "local=$VER published=$PUB"
+          if [ "$VER" = "$PUB" ]; then
+            echo "published=true" >> $GITHUB_OUTPUT
+          else
+            echo "published=false" >> $GITHUB_OUTPUT
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.published == 'false'
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Publish
+        if: steps.check.outputs.published == 'false'
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: github-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if version already published
+        id: check
+        run: |
+          VER=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          PUB=$(pip index versions typepress 2>/dev/null | head -1 | grep -oP '[\d.]+' || echo "0.0.0")
+          echo "local=$VER published=$PUB"
+          if [ "$VER" = "$PUB" ]; then
+            echo "published=true" >> $GITHUB_OUTPUT
+          else
+            echo "published=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build
+        if: steps.check.outputs.published == 'false'
+        run: |
+          pip install build
+          python3 -m build
+
+      - name: Publish
+        if: steps.check.outputs.published == 'false'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_TOKEN }}

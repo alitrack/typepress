@@ -1,0 +1,22 @@
+{
+  "name": "typepress",
+  "version": "0.3.2",
+  "description": "Pure Rust HTML/CSS → PDF engine — wkhtmltopdf replacement",
+  "keywords": ["html-to-pdf", "pdf", "wkhtmltopdf", "markdown", "css", "rust"],
+  "homepage": "https://github.com/alitrack/typepress",
+  "repository": "github:alitrack/typepress",
+  "license": "MIT",
+  "author": "TypePress Contributors",
+  "bin": {
+    "typepress": "./npm/run.js"
+  },
+  "files": [
+    "npm/",
+    "README.md"
+  ],
+  "os": ["linux", "darwin", "win32"],
+  "cpu": ["x64", "arm64"],
+  "scripts": {
+    "postinstall": "node npm/install.js"
+  }
+}
