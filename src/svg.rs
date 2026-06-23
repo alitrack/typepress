@@ -193,14 +193,23 @@ fn concat_matrix(current: &[f32; 6], new: &[f32; 6]) -> [f32; 6] {
 /// Decode a PDF text string using the font's CID→Unicode CMap.
 /// For CID fonts, the bytes are raw glyph IDs (big-endian u16 pairs).
 /// For non-CID fonts, falls back to Latin-1.
-fn decode_with_cmap(bytes: &[u8], cmap: &CidMap) -> String {
+///
+/// When `interleaved` is true, the bytes are in fulgur's interleaved format:
+/// [CID(2b)][ADJUST(2b)][CID(2b)][ADJUST(2b)]... — only decode even-indexed
+/// 2-byte pairs as CIDs, skip odd-indexed pairs (they're positioning adjustments).
+fn decode_with_cmap(bytes: &[u8], cmap: &CidMap, interleaved: bool) -> String {
     if cmap.is_empty() {
         // No CMap → Latin-1 fallback
         return bytes.iter().map(|&b| b as char).collect();
     }
     // CID font: each glyph is a 2-byte big-endian CID
     let mut result = String::new();
-    for chunk in bytes.chunks(2) {
+    let chunks: Vec<&[u8]> = bytes.chunks(2).collect();
+    for (i, chunk) in chunks.iter().enumerate() {
+        // In interleaved mode, skip odd-indexed pairs (adjustment values)
+        if interleaved && i % 2 == 1 {
+            continue;
+        }
         if chunk.len() == 2 {
             let cid = u16::from_be_bytes([chunk[0], chunk[1]]);
             if let Some(&ch) = cmap.get(&cid) {
@@ -333,7 +342,8 @@ pub fn extract_unicode_text(doc: &Document) -> Result<Vec<UnicodeTextItem>> {
                     {
                         let cmap = font_cmaps.get(&font_name);
                         let text = if let Some(c) = cmap {
-                            decode_with_cmap(bytes, c)
+                            // Tj: non-interleaved — each 2-byte pair is a CID
+                            decode_with_cmap(bytes, c, false)
                         } else {
                             bytes.iter().map(|&b| b as char).collect()
                         };
@@ -362,7 +372,10 @@ pub fn extract_unicode_text(doc: &Document) -> Result<Vec<UnicodeTextItem>> {
                         for elem in array {
                             if let Ok(bytes) = elem.as_str() {
                                 if let Some(c) = cmap {
-                                    combined.push_str(&decode_with_cmap(bytes, c));
+                                    // fulgur embeds advance adjustments as interleaved
+                                    // CID values [CID(2b)][ADJ(2b)][CID(2b)]...
+                                    // Even-indexed pairs = text, odd = skip.
+                                    combined.push_str(&decode_with_cmap(bytes, c, true));
                                 } else {
                                     combined.extend(bytes.iter().map(|&b| b as char));
                                 }
