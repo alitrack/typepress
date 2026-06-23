@@ -79,7 +79,14 @@ fn cli_md_with_math() {
     let _ = std::fs::remove_file(&out);
 
     let mut cmd = binary();
-    cmd.args(["--from", "md", "--math", "--stdin", "-o", out.to_str().unwrap()]);
+    cmd.args([
+        "--from",
+        "md",
+        "--math",
+        "--stdin",
+        "-o",
+        out.to_str().unwrap(),
+    ]);
     cmd.write_stdin("# Math\n\n$E=mc^2$");
     cmd.assert().success();
 
@@ -94,9 +101,14 @@ fn cli_math_svg_preserves_layout_features() {
 
     let mut cmd = binary();
     cmd.args([
-        "--from", "md", "--math", "--stdin",
-        "--format", "svg",
-        "-o", out.to_str().unwrap(),
+        "--from",
+        "md",
+        "--math",
+        "--stdin",
+        "--format",
+        "svg",
+        "-o",
+        out.to_str().unwrap(),
     ]);
     cmd.write_stdin(
         "# Math\n\n$E = mc^2$\n\n$\\sqrt{2}$\n\n$$\\frac{1}{2}$$\n\n$\\int_0^\\infty x_i^2 dx$",
@@ -114,10 +126,19 @@ fn cli_math_svg_preserves_layout_features() {
     let min = *sizes.first().expect("expected at least one text item");
     let max = *sizes.last().expect("expected at least one text item");
 
-    assert!(min < max, "math layout should produce reduced script font sizes");
+    assert!(
+        min < max,
+        "math layout should produce reduced script font sizes"
+    );
     assert!(svg.contains(">√<"), "radical glyph should be preserved");
-    assert!(svg.contains(">∞<"), "integral upper limit should be preserved");
-    assert!(!svg.contains("\\frac{1}{2}"), "raw LaTeX should not leak into output");
+    assert!(
+        svg.contains(">∞<"),
+        "integral upper limit should be preserved"
+    );
+    assert!(
+        !svg.contains("\\frac{1}{2}"),
+        "raw LaTeX should not leak into output"
+    );
 
     let _ = std::fs::remove_file(&out);
 }
@@ -149,9 +170,13 @@ fn cli_md_to_svg() {
 
     let mut cmd = binary();
     cmd.args([
-        "--from", "md", "--stdin",
-        "--format", "svg",
-        "-o", out.to_str().unwrap(),
+        "--from",
+        "md",
+        "--stdin",
+        "--format",
+        "svg",
+        "-o",
+        out.to_str().unwrap(),
     ]);
     cmd.write_stdin("# SVG Test\n\nContent.");
     cmd.assert().success();
@@ -170,10 +195,15 @@ fn cli_md_to_png() {
 
     let mut cmd = binary();
     cmd.args([
-        "--from", "md", "--stdin",
-        "--format", "png",
-        "--scale", "1.0",
-        "-o", out.to_str().unwrap(),
+        "--from",
+        "md",
+        "--stdin",
+        "--format",
+        "png",
+        "--scale",
+        "1.0",
+        "-o",
+        out.to_str().unwrap(),
     ]);
     cmd.write_stdin("# PNG Test\n\nOne line.");
     cmd.assert().success();
@@ -192,10 +222,15 @@ fn cli_with_header_footer() {
 
     let mut cmd = binary();
     cmd.args([
-        "--from", "md", "--stdin",
-        "--header", "My Report",
-        "--footer", "Page 1",
-        "-o", out.to_str().unwrap(),
+        "--from",
+        "md",
+        "--stdin",
+        "--header",
+        "My Report",
+        "--footer",
+        "Page 1",
+        "-o",
+        out.to_str().unwrap(),
     ]);
     cmd.write_stdin("# Report\n\nBody.");
     cmd.assert().success();

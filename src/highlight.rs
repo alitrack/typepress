@@ -31,13 +31,18 @@ fn highlight_code_blocks_inner(html: &mut String) -> Result<usize> {
     let theme = &ts.themes["base16-ocean.dark"];
 
     // Match <pre><code class="language-xxx">...</code></pre>
-    let re = Regex::new(
-        r#"<pre><code(?: class="language-(\w+)")?>([\s\S]*?)</code></pre>"#
-    )?;
+    let re = Regex::new(r#"<pre><code(?: class="language-(\w+)")?>([\s\S]*?)</code></pre>"#)?;
 
     let mut count = 0usize;
-    let matches: Vec<_> = re.captures_iter(html)
-        .map(|c| (c.get(0).unwrap().range(), c.get(1).map(|m| m.as_str().to_string()), c.get(2).unwrap().as_str().to_string()))
+    let matches: Vec<_> = re
+        .captures_iter(html)
+        .map(|c| {
+            (
+                c.get(0).unwrap().range(),
+                c.get(1).map(|m| m.as_str().to_string()),
+                c.get(2).unwrap().as_str().to_string(),
+            )
+        })
         .collect();
 
     for (range, lang, code) in matches.into_iter().rev() {
@@ -114,10 +119,15 @@ fn find_syntax<'a>(ss: &'a SyntaxSet, lang: &str) -> Option<&'a syntect::parsing
 }
 
 fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn html_decode(s: &str) -> String {
-    s.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
-        .replace("&quot;", "\"").replace("&#39;", "'")
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
 }
