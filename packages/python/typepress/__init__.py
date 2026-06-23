@@ -13,19 +13,23 @@ import platform
 import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import Optional
+from urllib.request import urlretrieve
 
 __version__ = "0.3.0"
-
-# ── Platform detection ──────────────────────────────────────────────────
 
 _BINARY_NAME = "typepress"
 if sys.platform == "win32":
     _BINARY_NAME = "typepress.exe"
 
+_GITHUB_RELEASES = "https://github.com/alitrack/typepress/releases/download"
 
-def _get_binary_dir() -> Path:
+
+def _get_cache_dir() -> Path:
     if sys.platform == "darwin":
         base = Path.home() / "Library" / "Caches" / "typepress"
     elif sys.platform == "win32":
@@ -36,38 +40,77 @@ def _get_binary_dir() -> Path:
     return base
 
 
+def _get_platform_tag() -> str:
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    if system == "linux":
+        return "linux-x86_64"
+    elif system == "darwin":
+        if machine == "arm64":
+            return "macos-arm64"
+        return "macos-x86_64"
+    elif system == "windows":
+        return "windows-x86_64"
+    raise RuntimeError(f"Unsupported platform: {system} {machine}")
+
+
 def _find_system_binary() -> Optional[Path]:
     which = shutil.which(_BINARY_NAME)
     if which:
         return Path(which)
-    candidates = [
+    for c in [
         Path("/usr/local/bin") / _BINARY_NAME,
         Path.home() / ".local" / "bin" / _BINARY_NAME,
         Path.home() / ".cargo" / "bin" / _BINARY_NAME,
-    ]
-    for c in candidates:
+    ]:
         if c.exists():
             return c
     return None
 
 
-def _resolve_binary(binary_path: Optional[str | Path]) -> Path:
+def _download_binary(version: str = __version__) -> Path:
+    cache_dir = _get_cache_dir()
+    cached = cache_dir / _BINARY_NAME
+    if cached.exists():
+        return cached
+
+    plat = _get_platform_tag()
+    ext = "zip" if sys.platform == "win32" else "tar.gz"
+    url = f"{_GITHUB_RELEASES}/v{version}/typepress-{plat}.{ext}"
+
+    sys.stderr.write(f"Downloading TypePress v{version} for {plat}...\n")
+    with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as tmp:
+        urlretrieve(url, tmp.name)
+
+    if ext == "tar.gz":
+        with tarfile.open(tmp.name, "r:gz") as tf:
+            tf.extract("typepress", cache_dir)
+    else:
+        with zipfile.ZipFile(tmp.name, "r") as zf:
+            zf.extract("typepress.exe", cache_dir)
+
+    os.unlink(tmp.name)
+    os.chmod(cached, 0o755)
+    sys.stderr.write(f"TypePress installed to {cached}\n")
+    return cached
+
+
+def _resolve_binary(binary_path: Optional[str | Path] = None) -> Path:
     if binary_path:
         p = Path(binary_path)
-    else:
-        p = _find_system_binary()
-        if p is None:
-            cached = _get_binary_dir() / _BINARY_NAME
-            if cached.exists():
-                p = cached
-            else:
-                raise RuntimeError(
-                    "TypePress binary not found. Install with: "
-                    "pip install typepress or from https://github.com/alitrack/typepress"
-                )
-    if not p.exists():
-        raise RuntimeError(f"TypePress binary not found at {p}")
-    return p
+        if not p.exists():
+            raise RuntimeError(f"TypePress binary not found at {p}")
+        return p
+
+    p = _find_system_binary()
+    if p is not None:
+        return p
+
+    cached = _get_cache_dir() / _BINARY_NAME
+    if cached.exists():
+        return cached
+
+    return _download_binary()
 
 
 # ── API ─────────────────────────────────────────────────────────────────
@@ -159,10 +202,5 @@ class TypePress:
 
 def main():
     """CLI entry point."""
-    binary = _find_system_binary()
-    if binary is None:
-        binary = _get_binary_dir() / _BINARY_NAME
-    if not binary.exists():
-        print("TypePress binary not found.", file=sys.stderr)
-        sys.exit(1)
+    binary = _resolve_binary()
     os.execv(str(binary), [str(binary)] + sys.argv[1:])
