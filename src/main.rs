@@ -117,6 +117,10 @@ struct Cli {
     tagged: bool,
     #[arg(long = "pdf-ua")]
     pdf_ua: bool,
+
+    /// Disable system fonts (use only explicitly loaded --font fonts)
+    #[arg(long = "no-system-fonts")]
+    no_system_fonts: bool,
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -127,6 +131,14 @@ fn parse_page_size(s: &str) -> PageSize {
         "A3" => PageSize::A3,
         "LETTER" => PageSize::LETTER,
         _ => {
+            // Try custom WxH in mm: "594x420"
+            if let Some((w, h)) = s.split_once('x') {
+                if let (Ok(w), Ok(h)) = (w.trim().parse::<f32>(), h.trim().parse::<f32>()) {
+                    if w > 0.0 && h > 0.0 {
+                        return PageSize::custom(w, h);
+                    }
+                }
+            }
             eprintln!("Unknown page size '{s}', defaulting to A4");
             PageSize::A4
         }
@@ -1197,8 +1209,8 @@ fn main() -> Result<()> {
     } else {
         // HTML pipeline: CSS Layout → Header/Footer → Math → Mermaid → Highlight
 
-        // 0a. CSS Layout preprocess: Grid/Flexbox → Table, Gradient → Solid
-        html = typepress::css_layout::process_css_layout(&html);
+        // 0a. CSS Layout: using native blitz-html 0.3 (flex/grid → taffy natively)
+        // (old Grid→Table preprocessing removed — no longer needed)
 
         // 1. Inject header/footer
         header_css = inject_header_footer(&mut html, header.as_deref(), footer.as_deref());
@@ -1296,6 +1308,9 @@ fn main() -> Result<()> {
     let mut builder = Engine::builder();
 
     // ── Merge YAML config (CLI args override YAML) ──
+    if cli.no_system_fonts {
+        builder = builder.system_fonts(false);
+    }
     if let Some(ref c) = cfg {
         if let Some(ref pc) = c.page {
             if cli.size.is_none() {

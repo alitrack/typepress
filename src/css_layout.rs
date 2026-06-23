@@ -423,7 +423,6 @@ fn extract_direct_children_divs(body: &str) -> Vec<String> {
     let len = bytes.len();
 
     while i < len {
-        // Skip whitespace
         while i < len && bytes[i].is_ascii_whitespace() {
             i += 1;
         }
@@ -431,35 +430,80 @@ fn extract_direct_children_divs(body: &str) -> Vec<String> {
             break;
         }
 
-        // Check for <div or other element starts
-        if i + 4 < len && &bytes[i..i + 4] == b"<div" {
-            let start = i;
-            let mut depth = 0;
-            while i < len {
-                if i + 4 < len
-                    && &bytes[i..i + 4] == b"<div"
-                    && (i + 4 >= len || bytes[i + 4].is_ascii_whitespace() || bytes[i + 4] == b'>')
-                {
-                    depth += 1;
+        if bytes[i] == b'<' {
+            // Skip comments <!-- -->
+            if i + 4 < len && &bytes[i..i + 4] == b"<!--" {
+                if let Some(end) = body[i..].find("-->") {
+                    i += end + 3;
+                    continue;
                 }
-                if i + 6 < len && &bytes[i..i + 6] == b"</div>" {
-                    depth -= 1;
-                    if depth == 0 {
-                        i += 6;
-                        break;
-                    }
-                }
-                i += 1;
+                break;
             }
-            children.push(body[start..i].to_string());
-        } else if bytes[i] == b'<' {
-            // Some other HTML element — skip past it
+            // Void elements: skip
+            if i + 2 < len {
+                let tag_start = i + 1;
+                let mut te = tag_start;
+                while te < len && bytes[te].is_ascii_alphanumeric() {
+                    te += 1;
+                }
+                let tname = &bytes[tag_start..te];
+                if tname == b"br" || tname == b"hr" || tname == b"img"
+                    || tname == b"input" || tname == b"meta" || tname == b"link"
+                {
+                    while i < len && bytes[i] != b'>' {
+                        i += 1;
+                    }
+                    i += 1;
+                    continue;
+                }
+            }
+
+            // Any other opening tag → find matching close
+            let tag_start = i + 1;
+            let mut te = tag_start;
+            while te < len && bytes[te].is_ascii_alphanumeric() {
+                te += 1;
+            }
+            let tname = &bytes[tag_start..te];
+
+            let start = i;
+            let mut depth = 1;
+            // Skip to end of opening tag
             while i < len && bytes[i] != b'>' {
                 i += 1;
             }
-            if i < len {
-                i += 1;
-            } // skip past >
+            i += 1;
+
+            // Find matching close tag
+            let close = format!("</{}>", String::from_utf8_lossy(tname));
+            let cb = close.as_bytes();
+            while i < len {
+                if bytes[i] == b'<'
+                    && i + 1 < len && bytes[i + 1] == b'/'
+                    && i + cb.len() <= len
+                    && &bytes[i..i + cb.len()] == cb
+                {
+                    i += cb.len();
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                } else if bytes[i] == b'<'
+                    && i + 1 < len && bytes[i + 1].is_ascii_alphabetic()
+                {
+                    let mut nt = i + 1;
+                    while nt < len && bytes[nt].is_ascii_alphanumeric() {
+                        nt += 1;
+                    }
+                    if &bytes[i + 1..nt] == tname {
+                        depth += 1;
+                    }
+                    i = nt;
+                } else {
+                    i += 1;
+                }
+            }
+            children.push(body[start..i].to_string());
         } else {
             // Text node
             let start = i;
@@ -624,9 +668,13 @@ fn convert_flex_div_to_table(
                     table_style
                 ));
 
-                // For nowrap: single row, one child per cell
-                // For wrap: try to intelligently group (default: max 6 per row)
-                let cols = if wrap { 6 } else { children.len().max(1) };
+                // wrap: all children in one row (table cells size naturally)
+                // nowrap: one row, one child per cell
+                let cols = if wrap {
+                    children.len().max(1) // single row, let table-layout:auto determine widths
+                } else {
+                    children.len().max(1)
+                };
 
                 let mut col = 0;
                 result.push_str("<tr>\n");
