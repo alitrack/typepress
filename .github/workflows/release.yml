@@ -21,9 +21,6 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact: typepress-macos-arm64
-          - os: macos-13
-            target: x86_64-apple-darwin
-            artifact: typepress-macos-x86_64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: typepress-windows-x86_64.exe
@@ -83,6 +80,5 @@ jobs:
           files: |
             typepress-linux-x86_64.tar.gz
             typepress-macos-arm64.tar.gz
-            typepress-macos-x86_64.tar.gz
             typepress-windows-x86_64.zip
           generate_release_notes: true

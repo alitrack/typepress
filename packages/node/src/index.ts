@@ -25,7 +25,7 @@ function getCacheDir(): string {
 
 function getPlatformTag(): string {
   if (platform === "linux") return "linux-x86_64";
-  if (platform === "darwin") return process.arch === "arm64" ? "macos-arm64" : "macos-x86_64";
+  if (platform === "darwin") return "macos-arm64"; // Intel Macs use Rosetta 2
   if (platform === "win32") return "windows-x86_64";
   throw new Error(`Unsupported platform: ${platform}`);
 }

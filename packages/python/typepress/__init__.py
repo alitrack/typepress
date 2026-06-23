@@ -46,9 +46,8 @@ def _get_platform_tag() -> str:
     if system == "linux":
         return "linux-x86_64"
     elif system == "darwin":
-        if machine == "arm64":
-            return "macos-arm64"
-        return "macos-x86_64"
+        # All modern Macs are Apple Silicon. Intel Macs use Rosetta 2.
+        return "macos-arm64"
     elif system == "windows":
         return "windows-x86_64"
     raise RuntimeError(f"Unsupported platform: {system} {machine}")
