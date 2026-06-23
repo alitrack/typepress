@@ -25,6 +25,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - run: sudo apt-get update && sudo apt-get install -y libfontconfig-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy -- -D warnings
 
@@ -34,6 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y libfontconfig-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release
 
@@ -43,5 +45,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y libfontconfig-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo test
