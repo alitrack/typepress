@@ -8,7 +8,7 @@ import { createGunzip } from "node:zlib";
 import { createWriteStream as fsCreateWriteStream } from "node:fs";
 import { Readable } from "node:stream";
 
-const VERSION = "0.3.0";
+const VERSION = "0.3.1";
 const GITHUB_RELEASES = "https://github.com/alitrack/typepress/releases/download";
 
 const BINARY_NAME = platform === "win32" ? "typepress.exe" : "typepress";
