@@ -1,0 +1,1056 @@
+use super::*;
+use super::{list_marker, positioned, pseudo};
+use crate::paragraph::{InlineBoxItem, ParagraphRender};
+
+/// Dispatcher entry for inline-root nodes (those with `node.flags.is_inline_root()`).
+///
+/// Builds a `ParagraphEntry` and inserts it into `out.paragraphs`. When the
+/// node has visual style or pseudo content, also inserts a `BlockEntry` so
+/// the dispatcher paints background / border / opacity around the paragraph.
+///
+/// Returns `true` when at least one entry was registered for this node.
+/// Returns `false` to fall through (when the node is not an inline root,
+/// or when an inline root has no text and no inline pseudo images).
+pub(super) fn try_convert(
+    doc: &BaseDocument,
+    node_id: usize,
+    ctx: &mut super::ConvertContext<'_>,
+    depth: usize,
+    out: &mut crate::drawables::Drawables,
+) -> bool {
+    let Some(node) = doc.get_node(node_id) else {
+        return false;
+    };
+    if !node.flags.is_inline_root() {
+        return false;
+    }
+    let (width, height) = size_in_pt(node.final_layout.size);
+
+    // PR 8i: snapshot taken BEFORE `extract_paragraph` because the latter
+    // recurses into inline-box children (registering their drawable
+    // entries into `out`). Pre-PR-8i, `extract_drawables_from_pageable`
+    // walked the v1 `BlockPageable` subtree and collected every nested
+    // node into `clip_descendants`/`opacity_descendants`; placing the
+    // snapshot after `extract_paragraph` would miss those exact nodes.
+    // The `id != node_id` filter on the diff drops the inline-root's
+    // own id from the descendant list; nested inline-box subtree
+    // members are intentionally NOT filtered against
+    // `inline_box_subtree_skip` so the render path's
+    // `draw_under_clip` re-dispatches them inside the clip group —
+    // mirroring the v1 ordering the golden PDFs encode.
+    let style = extract_block_style(node, ctx.assets);
+    let (opacity, visible) = extract_opacity_visible(node);
+    let needs_block_pre = style.needs_block_wrapper()
+        || pseudo::node_has_block_pseudo_image(doc, node)
+        || pseudo::node_has_absolute_pseudo(doc, node);
+    let clipping_pre = needs_block_pre && style.has_overflow_clip();
+    let opacity_scope_pre = needs_block_pre && !clipping_pre && opacity < 1.0;
+    let pre_snapshot = (clipping_pre || opacity_scope_pre).then(|| collect_drawables_node_ids(out));
+
+    let paragraph_opt = extract_paragraph(doc, node, ctx, depth, out);
+    let content_box = compute_content_box(node, &style);
+
+    // Inline pseudo images.
+    let before_inline = node
+        .before
+        .and_then(|id| doc.get_node(id))
+        .filter(|p| !pseudo::is_block_pseudo(p))
+        .and_then(|p| {
+            pseudo::build_inline_pseudo_image(p, content_box.width, content_box.height, ctx.assets)
+        })
+        .map(|mut img| {
+            pseudo::attach_link_to_inline_image(&mut img, doc, node.id);
+            img
+        });
+    let after_inline = node
+        .after
+        .and_then(|id| doc.get_node(id))
+        .filter(|p| !pseudo::is_block_pseudo(p))
+        .and_then(|p| {
+            pseudo::build_inline_pseudo_image(p, content_box.width, content_box.height, ctx.assets)
+        })
+        .map(|mut img| {
+            pseudo::attach_link_to_inline_image(&mut img, doc, node.id);
+            img
+        });
+
+    if let Some(mut paragraph) = paragraph_opt {
+        // Inject pseudo images BEFORE the list marker so the marker stays
+        // at index 0 of the first line after both injections.
+        if before_inline.is_some() || after_inline.is_some() {
+            pseudo::inject_inline_pseudo_images(&mut paragraph.lines, before_inline, after_inline);
+            recalculate_paragraph_line_boxes(&mut paragraph.lines);
+            paragraph.cached_height = paragraph.lines.iter().map(|l| l.height).sum();
+        }
+
+        // Inside list-style-image marker injection.
+        if !paragraph.lines.is_empty() {
+            let first_line_height = paragraph.lines[0].height;
+            if let Some(inline_img) =
+                list_marker::resolve_inside_image_marker(node, first_line_height, ctx.assets)
+            {
+                let shift = inline_img.width;
+                for item in &mut paragraph.lines[0].items {
+                    match item {
+                        LineItem::Text(run) => run.x_offset += shift,
+                        LineItem::Image(i) => i.x_offset += shift,
+                        LineItem::InlineBox(ib) => ib.x_offset += shift,
+                    }
+                }
+                paragraph.lines[0]
+                    .items
+                    .insert(0, LineItem::Image(inline_img));
+                recalculate_paragraph_line_boxes(&mut paragraph.lines);
+                paragraph.cached_height = paragraph.lines.iter().map(|l| l.height).sum();
+            }
+        }
+
+        // Block / abs pseudo wrapping decision (mirrors `needs_block_pre`
+        // computed up top so the snapshot side matches).
+        let needs_block = needs_block_pre;
+        let clipping = clipping_pre;
+        let _opacity_scope = opacity_scope_pre;
+
+        // Always insert the paragraph entry keyed by the inline-root id.
+        out.paragraphs.insert(
+            node_id,
+            crate::drawables::ParagraphEntry {
+                lines: paragraph.lines,
+                opacity: if needs_block { 1.0 } else { opacity },
+                visible,
+                id: extract_block_id(node),
+            },
+        );
+        if needs_block {
+            out.block_styles.insert(
+                node_id,
+                crate::drawables::BlockEntry {
+                    style,
+                    opacity,
+                    visible,
+                    id: extract_block_id(node),
+                    layout_size: Some(Size { width, height }),
+                    clip_descendants: Vec::new(),
+                    opacity_descendants: Vec::new(),
+                },
+            );
+            // Register pseudo content (block-pseudo images + abs children).
+            pseudo::register_pseudo_content(doc, node, ctx, depth, content_box, out);
+            if let Some(before) = pre_snapshot.as_ref() {
+                let after = collect_drawables_node_ids(out);
+                let descendants: Vec<usize> = after
+                    .difference(before)
+                    .copied()
+                    .filter(|&id| id != node_id)
+                    .collect();
+                if let Some(entry) = out.block_styles.get_mut(&node_id) {
+                    if clipping {
+                        entry.clip_descendants = descendants;
+                    } else {
+                        entry.opacity_descendants = descendants;
+                    }
+                }
+            }
+        }
+        return true;
+    } else if before_inline.is_some() || after_inline.is_some() {
+        // Synthesize a minimal paragraph for pseudo-only elements.
+        let mut line = ShapedLine {
+            height: 0.0,
+            baseline: 0.0,
+            items: vec![],
+        };
+        pseudo::inject_inline_pseudo_images(
+            std::slice::from_mut(&mut line),
+            before_inline,
+            after_inline,
+        );
+        let font_metrics = metrics_from_line(&line);
+        crate::paragraph::recalculate_line_box(&mut line, &font_metrics);
+        let lines = vec![line];
+
+        let needs_block = needs_block_pre;
+        let clipping = clipping_pre;
+        let _opacity_scope = opacity_scope_pre;
+
+        out.paragraphs.insert(
+            node_id,
+            crate::drawables::ParagraphEntry {
+                lines,
+                opacity: if needs_block { 1.0 } else { opacity },
+                visible,
+                id: extract_block_id(node),
+            },
+        );
+        if needs_block {
+            out.block_styles.insert(
+                node_id,
+                crate::drawables::BlockEntry {
+                    style,
+                    opacity,
+                    visible,
+                    id: extract_block_id(node),
+                    layout_size: Some(Size { width, height }),
+                    clip_descendants: Vec::new(),
+                    opacity_descendants: Vec::new(),
+                },
+            );
+            pseudo::register_pseudo_content(doc, node, ctx, depth, content_box, out);
+            if let Some(before) = pre_snapshot.as_ref() {
+                let after = collect_drawables_node_ids(out);
+                let descendants: Vec<usize> = after
+                    .difference(before)
+                    .copied()
+                    .filter(|&id| id != node_id)
+                    .collect();
+                if let Some(entry) = out.block_styles.get_mut(&node_id) {
+                    if clipping {
+                        entry.clip_descendants = descendants;
+                    } else {
+                        entry.opacity_descendants = descendants;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    // Inline root with no text and no inline pseudo images — fall through.
+    false
+}
+
+/// Extract `LineFontMetrics` from a `ShapedLine`'s Text items using skrifa.
+pub(super) fn metrics_from_line(line: &ShapedLine) -> LineFontMetrics {
+    let default = LineFontMetrics {
+        ascent: 12.0,
+        descent: 4.0,
+        x_height: 8.0,
+        subscript_offset: 4.0,
+        superscript_offset: 6.0,
+    };
+    for item in &line.items {
+        let run = match item {
+            LineItem::Text(r) => r,
+            LineItem::Image(_) => continue,
+            LineItem::InlineBox(_) => continue,
+        };
+        if let Ok(font_ref) = skrifa::FontRef::from_index(&run.font_data, run.font_index) {
+            let metrics = font_ref.metrics(
+                skrifa::instance::Size::new(run.font_size),
+                skrifa::instance::LocationRef::default(),
+            );
+            return LineFontMetrics {
+                ascent: metrics.ascent,
+                descent: metrics.descent.abs(),
+                x_height: metrics.x_height.unwrap_or(metrics.ascent * 0.5),
+                subscript_offset: metrics.ascent * 0.3,
+                superscript_offset: metrics.ascent * 0.4,
+            };
+        }
+    }
+    default
+}
+
+/// Recalculate line boxes for all lines in a paragraph.
+pub(super) fn recalculate_paragraph_line_boxes(lines: &mut [ShapedLine]) {
+    let mut original_y_acc: f32 = 0.0;
+    let mut new_y_acc: f32 = 0.0;
+    for line in lines.iter_mut() {
+        let original_height = line.height;
+        let font_metrics = metrics_from_line(line);
+        line.baseline -= original_y_acc;
+        crate::paragraph::recalculate_line_box(line, &font_metrics);
+        for item in &mut line.items {
+            if let LineItem::Image(img) = item {
+                img.computed_y += new_y_acc;
+            }
+        }
+        line.baseline += new_y_acc;
+        original_y_acc += original_height;
+        new_y_acc += line.height;
+    }
+}
+
+/// Walk up from `start_id` to find the closest `<a href>` ancestor and
+/// build a `LinkSpan`.
+pub(super) fn resolve_enclosing_anchor(
+    doc: &BaseDocument,
+    start_id: usize,
+) -> Option<(usize, LinkSpan)> {
+    let mut cur = Some(start_id);
+    let mut depth: usize = 0;
+    while let Some(id) = cur {
+        if depth >= MAX_DOM_DEPTH {
+            return None;
+        }
+        let node = doc.get_node(id)?;
+        if let NodeData::Element(el) = &node.data {
+            if el.name.local.as_ref() == "a" {
+                let href = crate::blitz_adapter::get_attr(el, "href")?.trim();
+                if href.is_empty() {
+                    return None;
+                }
+                let target = if let Some(frag) = href.strip_prefix('#') {
+                    LinkTarget::Internal(Arc::new(frag.to_string()))
+                } else {
+                    LinkTarget::External(Arc::new(href.to_string()))
+                };
+                let alt = crate::blitz_adapter::element_text(doc, id);
+                let alt_text = if alt.is_empty() { None } else { Some(alt) };
+                return Some((id, LinkSpan { target, alt_text }));
+            }
+        }
+        cur = node.parent;
+        depth += 1;
+    }
+    None
+}
+
+/// CSS 2.1 §10.8.1: return the offset from an inline-block's top edge to
+/// the baseline used for `vertical-align: baseline` (the baseline of the
+/// *last* line box inside). Returns `None` when no in-flow baseline is
+/// available, in which case the caller falls back to the bottom margin
+/// edge (zero `baseline_shift`).
+///
+/// Drawables-aware baseline lookup. Inline-box content is represented by an
+/// `InlineBoxPlaceholder` carrying only `node_id`, so there is
+/// no trait tree to walk. Read the baseline from `out.paragraphs[node_id]`
+/// (the inline-root case) or recurse into the node's Taffy children
+/// (flex / grid / ordinary block) to find the last in-flow descendant that
+/// contributes a baseline.
+///
+/// Returns `None` when:
+/// - the inline-block has `overflow: clip|hidden|scroll|auto` (the spec
+///   fallback),
+/// - no descendant contributes a CSS line baseline (a leaf `<img>` /
+///   `<svg>` / `<canvas>` inline-box).
+pub(super) fn inline_box_baseline_offset_from_drawables(
+    doc: &BaseDocument,
+    out: &crate::drawables::Drawables,
+    node_id: usize,
+) -> Option<f32> {
+    if let Some(block) = out.block_styles.get(&node_id)
+        && block.style.has_overflow_clip()
+    {
+        return None;
+    }
+    pageable_last_baseline_from_drawables(doc, out, node_id, 0)
+}
+
+/// Recursive worker for `inline_box_baseline_offset_from_drawables`.
+/// Mirrors the pre-PR-8i `pageable_last_baseline` walk over
+/// `BlockPageable.children` in REVERSE — except the children list is
+/// derived from `node.layout_children` / `node.children` (Taffy DOM)
+/// instead of the Pageable tree. `top_inset` of each container adds its
+/// own `border-top + padding-top`; child layout `location.y` adds the
+/// child's offset within the container; the recursive call returns the
+/// inner baseline relative to the child's top edge.
+fn pageable_last_baseline_from_drawables(
+    doc: &BaseDocument,
+    out: &crate::drawables::Drawables,
+    node_id: usize,
+    depth: usize,
+) -> Option<f32> {
+    if depth >= MAX_DOM_DEPTH {
+        return None;
+    }
+    // 1) If this node has a paragraph entry (inline-root), use the last
+    //    line's baseline + the node's top_inset (border + padding).
+    if let Some(para) = out.paragraphs.get(&node_id) {
+        let top_inset = out
+            .block_styles
+            .get(&node_id)
+            .map(|b| b.style.border_widths[0] + b.style.padding[0])
+            .unwrap_or(0.0);
+        if let Some(line) = para.lines.last() {
+            return Some(top_inset + line.baseline);
+        }
+    }
+    // 2) Otherwise walk DOM children in REVERSE, mirroring v1's
+    //    `BlockPageable::children.iter().rev()` search. Use Blitz's
+    //    `layout_children` when available so anonymous block wrappers
+    //    around inline-level siblings are visited correctly.
+    let node = doc.get_node(node_id)?;
+    let layout_children_borrow = node.layout_children.borrow();
+    // An explicit `Some([])` from Blitz means "no in-flow children" and is
+    // authoritative — fall back to `node.children` only when Blitz has not
+    // populated `layout_children` at all. Otherwise an inline-block whose
+    // only descendants are absolutely-positioned would walk those out-of-flow
+    // nodes here and report a bogus baseline.
+    let walk_children: &[usize] = layout_children_borrow.as_deref().unwrap_or(&node.children);
+    for &child_id in walk_children.iter().rev() {
+        let Some(child) = doc.get_node(child_id) else {
+            continue;
+        };
+        if let Some(inner) = pageable_last_baseline_from_drawables(doc, out, child_id, depth + 1) {
+            // Child y inside this container, in PDF pt. The child
+            // recursively returns its inner baseline relative to its
+            // own top edge; the container's own `top_inset` is folded
+            // in by branch (1) above.
+            return Some(px_to_pt(child.final_layout.location.y) + inner);
+        }
+    }
+    None
+}
+
+/// Recursively convert the Blitz node referenced by a Parley `InlineBox.id`.
+///
+/// Returns `Some(node_id)` for normal inline boxes so that
+/// `paragraph::draw_shaped_lines` can look up the content's geometry /
+/// drawables entry and dispatch it through
+/// `render::dispatch_inline_box_content`. Returns `None` for
+/// absolutely-positioned pseudos — those are re-emitted by
+/// `walk_absolute_pseudo_children` at the CSS-correct position and must
+/// not be dispatched via the inline-box path.
+///
+/// The side-effect call to `convert_node` registers the inline-box subtree
+/// into `out` so the v2 dispatcher can find it.
+fn convert_inline_box_node(
+    doc: &BaseDocument,
+    node_id: usize,
+    ctx: &mut ConvertContext<'_>,
+    depth: usize,
+    out: &mut crate::drawables::Drawables,
+) -> Option<usize> {
+    // Suppress the rendering path for absolutely-positioned pseudos that
+    // Blitz routes through Parley's inline layout — they are re-emitted by
+    // `walk_absolute_pseudo_children` at the CSS-correct position. Letting
+    // them register here would double-paint via the inline-box dispatch.
+    // Returning `None` causes `paragraph::draw_shaped_lines` to skip the
+    // inline-box dispatch for this item.
+    if let Some(node) = doc.get_node(node_id) {
+        if positioned::is_absolutely_positioned(node) && is_pseudo_node(doc, node) {
+            return None;
+        }
+    }
+    convert_node(doc, node_id, ctx, depth + 1, out);
+    Some(node_id)
+}
+
+/// Extract a `ParagraphRender` from an inline root node. The caller
+/// (`try_convert` above, or `list_item::build_list_item_body`) consumes
+/// the returned paragraph and inserts a `ParagraphEntry` into `out`. We
+/// keep returning `Option<ParagraphRender>` instead of writing into `out`
+/// here so callers can inject pseudo images / list markers BEFORE
+/// committing the entry — the pre-PR-8i interface in that respect.
+///
+/// The `out` parameter still flows through because inline-box recursion
+/// registers its subtree directly into `out` via `convert_node`. After the
+/// recursion completes we record `inline_box_subtree_skip` /
+/// `inline_box_subtree_descendants` so the v2 dispatcher knows to defer
+/// dispatch to the paragraph render path.
+pub(super) fn extract_paragraph(
+    doc: &BaseDocument,
+    node: &Node,
+    ctx: &mut ConvertContext<'_>,
+    depth: usize,
+    out: &mut crate::drawables::Drawables,
+) -> Option<ParagraphRender> {
+    let elem_data = node.element_data()?;
+    let text_layout = elem_data.inline_layout_data.as_ref()?;
+
+    let parley_layout = &text_layout.layout;
+    let text = &text_layout.text;
+
+    let mut shaped_lines = Vec::new();
+    let mut accumulated_line_top: f32 = 0.0;
+
+    for line in parley_layout.lines() {
+        let metrics = line.metrics();
+        let mut items = Vec::new();
+        // Track cumulative glyph offset within a Run across consecutive GlyphRuns
+        // that share the same parent Run. Reset when the Run changes.
+        let mut prev_run_key = usize::MAX;
+        let mut run_glyph_offset = 0usize;
+
+        for item in line.items() {
+            match item {
+                parley::PositionedLayoutItem::GlyphRun(glyph_run) => {
+                    let run = glyph_run.run();
+                    let font_ref = run.font();
+                    let font_index = font_ref.index;
+                    let font_arc = ctx.get_or_insert_font(font_ref);
+                    let font_size_parley = run.font_size();
+                    let font_size = px_to_pt(font_size_parley);
+
+                    let brush = &glyph_run.style().brush;
+                    let color = get_text_color(doc, brush.id);
+                    let decoration = get_text_decoration(doc, brush.id);
+                    let link = ctx.link_cache.lookup(doc, brush.id);
+
+                    // Advance or reset the per-Run offset counter.
+                    let run_key = run.cluster_range().start;
+                    if run_key != prev_run_key {
+                        prev_run_key = run_key;
+                        run_glyph_offset = 0;
+                    }
+                    let glyph_start = run_glyph_offset;
+
+                    // Build (text_range, Glyph) pairs scoped to this GlyphRun.
+                    // `glyph_run.glyphs()` = run.visual_clusters().flat_map(.glyphs())
+                    //   .skip(glyph_start).take(glyph_count).
+                    // We replicate the same window on the annotated cluster sequence
+                    // and advance the offset counter by the number of glyphs consumed.
+                    let mut annotated = run
+                        .visual_clusters()
+                        .flat_map(|cluster| {
+                            let r = cluster.text_range();
+                            cluster.glyphs().map(move |g| (r.clone(), g))
+                        })
+                        .skip(glyph_start);
+
+                    let mut glyphs = Vec::new();
+                    for g in glyph_run.glyphs() {
+                        let (text_range, _) = annotated.next().unwrap_or_else(|| {
+                            panic!(
+                                "annotated cluster iterator exhausted before glyph_run.glyphs(); \
+                                 run cluster_range={:?}, glyph_start={glyph_start}",
+                                run.cluster_range()
+                            )
+                        });
+                        run_glyph_offset += 1;
+                        glyphs.push(ShapedGlyph {
+                            id: g.id,
+                            x_advance: g.advance / font_size_parley,
+                            x_offset: g.x / font_size_parley,
+                            y_offset: g.y / font_size_parley,
+                            text_range,
+                        });
+                    }
+
+                    if !glyphs.is_empty() {
+                        let run_text = text.clone();
+                        let run_x_offset = px_to_pt(glyph_run.offset());
+                        items.push(LineItem::Text(ShapedGlyphRun {
+                            font_data: font_arc,
+                            font_index,
+                            font_size,
+                            color,
+                            decoration,
+                            glyphs,
+                            text: run_text,
+                            x_offset: run_x_offset,
+                            link,
+                        }));
+                    }
+                }
+                parley::PositionedLayoutItem::InlineBox(positioned) => {
+                    let node_id = positioned.id as usize;
+                    if let Some(box_node) = doc.get_node(node_id) {
+                        if positioned::is_absolutely_positioned(box_node)
+                            && is_pseudo_node(doc, box_node)
+                        {
+                            continue;
+                        }
+                    }
+                    // Snapshot before recursing so we can compute the
+                    // inline-box descendant set for the v2 dispatcher's
+                    // skip table.
+                    let before = collect_drawables_node_ids(out);
+                    let content = convert_inline_box_node(doc, node_id, ctx, depth, out);
+                    let after = collect_drawables_node_ids(out);
+                    // Record the descendants the paragraph render path
+                    // owns under its offset transform. Filter against
+                    // already-recorded skip entries so nested inline-boxes
+                    // don't double-register.
+                    let descendants: Vec<crate::drawables::NodeId> = after
+                        .difference(&before)
+                        .copied()
+                        .filter(|id| *id != node_id)
+                        .filter(|id| !out.inline_box_subtree_skip.contains(id))
+                        .collect();
+                    out.inline_box_subtree_skip.insert(node_id);
+                    out.inline_box_subtree_skip
+                        .extend(descendants.iter().copied());
+                    out.inline_box_subtree_descendants
+                        .insert(node_id, descendants);
+
+                    let link = ctx.link_cache.lookup(doc, node_id);
+                    let height_pt = px_to_pt(positioned.height);
+                    // Read baseline from `out` (Drawables). The Drawables-aware
+                    // lookup queries `out.paragraphs[node_id]` (and
+                    // `block_styles[node_id]` for top-inset) directly.
+                    let baseline_shift =
+                        inline_box_baseline_offset_from_drawables(doc, out, node_id)
+                            .map(|bo| height_pt - bo)
+                            .unwrap_or(0.0);
+                    let computed_y = px_to_pt(positioned.y) - accumulated_line_top + baseline_shift;
+                    let visible = doc
+                        .get_node(node_id)
+                        .map(super::style::extract_opacity_visible)
+                        .map(|(_, v)| v)
+                        .unwrap_or(true);
+                    items.push(LineItem::InlineBox(InlineBoxItem {
+                        node_id: content,
+                        width: px_to_pt(positioned.width),
+                        height: height_pt,
+                        x_offset: px_to_pt(positioned.x),
+                        computed_y,
+                        link,
+                        opacity: 1.0,
+                        visible,
+                    }));
+                }
+            }
+        }
+
+        let line_height_pt = px_to_pt(metrics.line_height);
+        shaped_lines.push(ShapedLine {
+            height: line_height_pt,
+            baseline: px_to_pt(metrics.baseline),
+            items,
+        });
+        accumulated_line_top += line_height_pt;
+    }
+
+    if shaped_lines.is_empty() {
+        return None;
+    }
+
+    Some(ParagraphRender::new(shaped_lines).with_id(extract_block_id(node)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::image::ImageFormat;
+    use crate::paragraph::{
+        InlineBoxItem, InlineImage, LineItem, ShapedGlyphRun, ShapedLine, TextDecoration,
+        VerticalAlign,
+    };
+    use std::sync::Arc;
+
+    // ── Helpers ────────────────────────────────────────────────────────────
+
+    fn approx(a: f32, b: f32) -> bool {
+        (a - b).abs() < 0.01
+    }
+
+    /// A line with no items (text-only placeholder) and a paragraph-relative
+    /// baseline. `baseline` here is the offset from the paragraph top, matching
+    /// the convention used by `extract_paragraph` (which stores
+    /// `px_to_pt(parley_metrics.baseline)` — a paragraph-relative value).
+    fn text_line(height: f32, baseline: f32) -> ShapedLine {
+        ShapedLine {
+            height,
+            baseline,
+            items: Vec::new(),
+        }
+    }
+
+    fn make_text_run(font_data: Vec<u8>) -> LineItem {
+        LineItem::Text(ShapedGlyphRun {
+            font_data: Arc::new(font_data),
+            font_index: 0,
+            font_size: 12.0,
+            color: [0, 0, 0, 255],
+            decoration: TextDecoration::default(),
+            glyphs: Vec::new(),
+            text: String::new(),
+            x_offset: 0.0,
+            link: None,
+        })
+    }
+
+    fn make_image(width: f32, height: f32, va: VerticalAlign) -> LineItem {
+        LineItem::Image(InlineImage {
+            data: Arc::new(vec![]),
+            format: ImageFormat::Png,
+            width,
+            height,
+            x_offset: 0.0,
+            vertical_align: va,
+            opacity: 1.0,
+            visible: true,
+            computed_y: 0.0,
+            link: None,
+        })
+    }
+
+    fn make_inline_box() -> LineItem {
+        LineItem::InlineBox(InlineBoxItem {
+            node_id: None,
+            width: 10.0,
+            height: 10.0,
+            x_offset: 0.0,
+            computed_y: 0.0,
+            link: None,
+            opacity: 1.0,
+            visible: true,
+        })
+    }
+
+    /// Collect `computed_y` from every `Image` item in `items`.
+    /// Called with text-only lines (covering `_ => None`) and image lines
+    /// (covering the `Image` arm) so both arms are always exercised.
+    fn image_ys(items: &[LineItem]) -> Vec<f32> {
+        items
+            .iter()
+            .filter_map(|item| match item {
+                LineItem::Image(img) => Some(img.computed_y),
+                _ => None,
+            })
+            .collect()
+    }
+
+    // Expected fallback values from the `default` literal in `metrics_from_line`.
+    const DEF_ASCENT: f32 = 12.0;
+    const DEF_DESCENT: f32 = 4.0;
+    const DEF_X_HEIGHT: f32 = 8.0;
+    const DEF_SUBSCRIPT: f32 = 4.0;
+    const DEF_SUPERSCRIPT: f32 = 6.0;
+
+    // ── metrics_from_line ──────────────────────────────────────────────────
+
+    #[test]
+    fn metrics_from_line_empty_line_returns_defaults() {
+        let line = text_line(16.0, 12.0);
+        let m = metrics_from_line(&line);
+        assert!(approx(m.ascent, DEF_ASCENT), "ascent={}", m.ascent);
+        assert!(approx(m.descent, DEF_DESCENT), "descent={}", m.descent);
+        assert!(approx(m.x_height, DEF_X_HEIGHT), "x_height={}", m.x_height);
+        assert!(
+            approx(m.subscript_offset, DEF_SUBSCRIPT),
+            "subscript={}",
+            m.subscript_offset
+        );
+        assert!(
+            approx(m.superscript_offset, DEF_SUPERSCRIPT),
+            "superscript={}",
+            m.superscript_offset
+        );
+    }
+
+    /// `LineItem::Image` arms hit the `continue` branch — the function skips
+    /// all image items and falls through to the default return.
+    #[test]
+    fn metrics_from_line_image_only_returns_defaults() {
+        let mut line = text_line(16.0, 12.0);
+        line.items
+            .push(make_image(10.0, 8.0, VerticalAlign::Baseline));
+        let m = metrics_from_line(&line);
+        assert!(approx(m.ascent, DEF_ASCENT), "ascent={}", m.ascent);
+    }
+
+    /// `LineItem::InlineBox` arms hit the `continue` branch — same fallback.
+    #[test]
+    fn metrics_from_line_inline_box_only_returns_defaults() {
+        let mut line = text_line(16.0, 12.0);
+        line.items.push(make_inline_box());
+        let m = metrics_from_line(&line);
+        assert!(approx(m.ascent, DEF_ASCENT), "ascent={}", m.ascent);
+    }
+
+    /// Empty / invalid font bytes cause `skrifa::FontRef::from_index` to fail.
+    /// The `if let Ok(...)` guard is not entered, so the loop continues and the
+    /// function returns defaults after exhausting all items.
+    #[test]
+    fn metrics_from_line_invalid_font_bytes_returns_defaults() {
+        let mut line = text_line(16.0, 12.0);
+        line.items.push(make_text_run(vec![]));
+        let m = metrics_from_line(&line);
+        assert!(approx(m.ascent, DEF_ASCENT), "ascent={}", m.ascent);
+        assert!(approx(m.descent, DEF_DESCENT), "descent={}", m.descent);
+    }
+
+    /// Mixed line: one image (skipped), one text with bad font (falls through),
+    /// one inline-box (skipped) — all paths return defaults.
+    #[test]
+    fn metrics_from_line_mixed_non_text_items_return_defaults() {
+        let mut line = text_line(16.0, 12.0);
+        line.items.push(make_image(5.0, 5.0, VerticalAlign::Middle));
+        line.items.push(make_text_run(vec![0, 1, 2, 3]));
+        line.items.push(make_inline_box());
+        let m = metrics_from_line(&line);
+        assert!(approx(m.ascent, DEF_ASCENT), "ascent={}", m.ascent);
+        assert!(
+            approx(m.subscript_offset, DEF_SUBSCRIPT),
+            "subscript={}",
+            m.subscript_offset
+        );
+    }
+
+    // ── recalculate_paragraph_line_boxes ──────────────────────────────────
+
+    #[test]
+    fn recalculate_paragraph_line_boxes_empty_slice_is_noop() {
+        let mut lines: Vec<ShapedLine> = Vec::new();
+        recalculate_paragraph_line_boxes(&mut lines);
+        assert!(lines.is_empty());
+    }
+
+    /// A text-only line has no images, so `recalculate_line_box` is a no-op
+    /// for both height and baseline.  For the first line `original_y_acc` and
+    /// `new_y_acc` are both 0 — the normalization/de-normalization cancels out
+    /// and the stored values are unchanged.
+    #[test]
+    fn recalculate_paragraph_line_boxes_text_only_single_line_unchanged() {
+        let mut lines = vec![{
+            let mut l = text_line(16.0, 12.0);
+            l.items.push(make_text_run(vec![]));
+            l
+        }];
+        recalculate_paragraph_line_boxes(&mut lines);
+        assert!(approx(lines[0].height, 16.0), "height={}", lines[0].height);
+        assert!(
+            approx(lines[0].baseline, 12.0),
+            "baseline={}",
+            lines[0].baseline
+        );
+    }
+
+    /// Two text-only lines: for each line `new_y_acc == original_y_acc`
+    /// (no expansion), so `baseline -= original_y_acc` and
+    /// `baseline += new_y_acc` cancel out — both baselines are unchanged.
+    #[test]
+    fn recalculate_paragraph_line_boxes_two_text_lines_baselines_unchanged() {
+        // Paragraph-relative baselines: line 0 baseline=12, line 1 baseline=26
+        // (line 0 is 16pt tall, line 1 has 10pt line-relative baseline → 16+10=26).
+        let mut lines = vec![
+            {
+                let mut l = text_line(16.0, 12.0);
+                l.items.push(make_text_run(vec![]));
+                l
+            },
+            {
+                let mut l = text_line(14.0, 26.0);
+                l.items.push(make_text_run(vec![]));
+                l
+            },
+        ];
+        recalculate_paragraph_line_boxes(&mut lines);
+        assert!(
+            approx(lines[0].height, 16.0),
+            "line0 height={}",
+            lines[0].height
+        );
+        assert!(
+            approx(lines[0].baseline, 12.0),
+            "line0 baseline={}",
+            lines[0].baseline
+        );
+        assert!(
+            approx(lines[1].height, 14.0),
+            "line1 height={}",
+            lines[1].height
+        );
+        assert!(
+            approx(lines[1].baseline, 26.0),
+            "line1 baseline={}",
+            lines[1].baseline
+        );
+    }
+
+    /// A Baseline-aligned image that fits inside the first line's box causes no
+    /// height expansion. `recalculate_line_box` sets `img.computed_y` to
+    /// `img_top` (baseline − image_height).  For the first line `new_y_acc==0`,
+    /// so the final paragraph-relative `computed_y` equals the line-relative
+    /// `img_top`.
+    ///
+    /// Line: height=16, baseline=12.  img height=8 → img_top = 12−8 = 4.
+    #[test]
+    fn recalculate_paragraph_line_boxes_baseline_image_in_first_line_sets_computed_y() {
+        let mut lines = vec![{
+            let mut l = text_line(16.0, 12.0);
+            l.items.push(make_image(10.0, 8.0, VerticalAlign::Baseline));
+            l
+        }];
+        recalculate_paragraph_line_boxes(&mut lines);
+        assert!(approx(lines[0].height, 16.0), "height={}", lines[0].height);
+        assert!(
+            approx(lines[0].baseline, 12.0),
+            "baseline={}",
+            lines[0].baseline
+        );
+        if let LineItem::Image(img) = &lines[0].items[0] {
+            assert!(approx(img.computed_y, 4.0), "computed_y={}", img.computed_y);
+        } else {
+            panic!("expected Image at index 0");
+        }
+    }
+
+    /// An image in the SECOND line receives `new_y_acc` (the height of the
+    /// first line) added to its computed_y, making the result paragraph-relative.
+    ///
+    /// Line 0: height=10, baseline=8, text-only  → new_y_acc becomes 10.
+    /// Line 1: height=16, paragraph-relative baseline=18 (line-relative 8),
+    ///         image (Baseline, height=2) → line-relative img_top = 8−2 = 6.
+    ///         After `img.computed_y += new_y_acc(10)` → paragraph-relative = 16.
+    #[test]
+    fn recalculate_paragraph_line_boxes_image_in_second_line_gets_paragraph_offset() {
+        let line1_para_baseline = 10.0 + 8.0; // accumulated height(10) + line-relative baseline(8)
+        let mut lines = vec![
+            {
+                // Line 0: text-only, height=10, paragraph-relative baseline=8.
+                let mut l = text_line(10.0, 8.0);
+                l.items.push(make_text_run(vec![]));
+                l
+            },
+            {
+                // Line 1: one small image (height=2, Baseline). The image fits
+                // within the line box after normalization so no height expansion
+                // occurs: line height stays 16.
+                let mut l = text_line(16.0, line1_para_baseline);
+                l.items.push(make_image(5.0, 2.0, VerticalAlign::Baseline));
+                l
+            },
+        ];
+        recalculate_paragraph_line_boxes(&mut lines);
+
+        // Line 0 must be unchanged.
+        assert!(
+            approx(lines[0].height, 10.0),
+            "line0 height={}",
+            lines[0].height
+        );
+
+        // For line 1: normalize baseline → 18-10=8; img_top=8-2=6; no expansion;
+        // img.computed_y = 6 → += new_y_acc(10) → 16.
+        if let LineItem::Image(img) = &lines[1].items[0] {
+            assert!(
+                approx(img.computed_y, 16.0),
+                "computed_y={}",
+                img.computed_y
+            );
+        } else {
+            panic!("expected Image in line 1 at index 0");
+        }
+    }
+
+    // ── metrics_from_line: happy path with real font bytes ─────────────────
+
+    /// Exercises the `Ok(font_ref)` branch of `metrics_from_line`: when the
+    /// text run carries valid TTF bytes, skrifa parses the font and returns
+    /// real metrics rather than the hard-coded fallback values.
+    ///
+    /// We only assert that the values are positive and that ascent is NOT
+    /// the fallback (12.0), which would indicate the font branch was entered.
+    #[test]
+    fn metrics_from_line_real_font_returns_font_metrics() {
+        const NOTO_SANS: &[u8] = include_bytes!("../../../../examples/.fonts/NotoSans-Regular.ttf");
+
+        let mut line = text_line(16.0, 12.0);
+        line.items.push(make_text_run(NOTO_SANS.to_vec()));
+        let m = metrics_from_line(&line);
+
+        // The real font branch was taken, so values differ from the fallback.
+        assert!(
+            m.ascent != DEF_ASCENT,
+            "expected real font ascent, got fallback 12.0"
+        );
+        assert!(m.ascent > 0.0, "ascent={}", m.ascent);
+        assert!(m.descent > 0.0, "descent={}", m.descent);
+        assert!(m.x_height > 0.0, "x_height={}", m.x_height);
+        // Derived fields follow ascent proportionally.
+        let expected_sub = m.ascent * 0.3;
+        let expected_sup = m.ascent * 0.4;
+        assert!(approx(m.subscript_offset, expected_sub));
+        assert!(approx(m.superscript_offset, expected_sup));
+    }
+
+    /// When multiple items precede the first valid-font text run, the function
+    /// must skip non-text items and continue to find the first parseable font.
+    #[test]
+    fn metrics_from_line_real_font_skips_non_text_items_before_it() {
+        const NOTO_SANS: &[u8] = include_bytes!("../../../../examples/.fonts/NotoSans-Regular.ttf");
+
+        let mut line = text_line(16.0, 12.0);
+        // image and inline-box come first, then a valid-font text run.
+        line.items
+            .push(make_image(5.0, 5.0, VerticalAlign::Baseline));
+        line.items.push(make_inline_box());
+        line.items.push(make_text_run(NOTO_SANS.to_vec()));
+        let m = metrics_from_line(&line);
+
+        assert!(m.ascent != DEF_ASCENT, "expected real font, got default");
+        assert!(m.ascent > 0.0, "ascent={}", m.ascent);
+    }
+
+    // ── recalculate_paragraph_line_boxes: divergent new_y_acc ─────────────
+
+    /// When a tall Baseline image causes line 0 to expand (height 16 → 24),
+    /// `new_y_acc` and `original_y_acc` diverge after line 0:
+    ///   original_y_acc = 16 (original height)
+    ///   new_y_acc      = 24 (expanded height)
+    ///
+    /// Line 1's baseline must be adjusted by `new_y_acc` (24), not
+    /// `original_y_acc` (16). Without this, subsequent text would land at
+    /// the wrong vertical position inside the expanded paragraph box.
+    ///
+    /// Setup (all values in PDF pt, default font metrics: ascent=12, descent=4):
+    ///   Line 0: height=16, para-relative baseline=12
+    ///           Baseline image height=20 → img_top = 12-20 = -8 < line_top(0)
+    ///           After recalculate_line_box: line_top=-8, height=24, baseline=20
+    ///   Line 1: height=12, para-relative baseline=24 (original line 0 height + 8)
+    ///           No images.
+    ///           Normalize:   baseline -= original_y_acc(16) → 24-16 = 8
+    ///           Recalculate: no change (text-only)
+    ///           De-normalize: baseline += new_y_acc(24)    → 8+24  = 32
+    #[test]
+    fn recalculate_paragraph_line_boxes_expanding_line_shifts_subsequent_baseline() {
+        let mut lines = vec![
+            {
+                // Line 0: tall Baseline image forces expansion.
+                let mut l = text_line(16.0, 12.0);
+                l.items.push(make_image(5.0, 20.0, VerticalAlign::Baseline));
+                l
+            },
+            {
+                // Line 1: text-only. Para-relative baseline = original line-0
+                // height (16) + line-local baseline (8) = 24.
+                let mut l = text_line(12.0, 24.0);
+                l.items.push(make_text_run(vec![]));
+                l
+            },
+        ];
+        recalculate_paragraph_line_boxes(&mut lines);
+
+        // Line 0 must expand.
+        let (h0, b0) = (lines[0].height, lines[0].baseline);
+        assert!(approx(h0, 24.0));
+        assert!(approx(b0, 20.0));
+
+        // Line 1 height unchanged; baseline adjusted by new_y_acc=24 not 16.
+        let (h1, b1) = (lines[1].height, lines[1].baseline);
+        assert!(approx(h1, 12.0));
+        assert!(approx(b1, 32.0));
+        // Text-only line has no images; this call covers the `_ => None` arm of image_ys.
+        assert!(image_ys(&lines[1].items).is_empty());
+    }
+
+    /// Companion to the above: an image in line 1 must receive `new_y_acc=24`
+    /// (the expanded first-line height) as its paragraph-offset, not the
+    /// original 16. This exercises `img.computed_y += new_y_acc` when
+    /// `new_y_acc != original_y_acc`.
+    ///
+    /// Line 1: height=12, baseline=24 (para-relative), image height=4 (Baseline).
+    ///   Normalize baseline: 24-16=8
+    ///   img_top = 8-4=4, img_bottom=8 → within [0,12), no expansion.
+    ///   img.computed_y = 4, then += new_y_acc(24) → 28.
+    #[test]
+    fn recalculate_paragraph_line_boxes_image_in_second_line_uses_expanded_new_y_acc() {
+        let mut lines = vec![
+            {
+                let mut l = text_line(16.0, 12.0);
+                l.items.push(make_image(5.0, 20.0, VerticalAlign::Baseline));
+                l
+            },
+            {
+                // Line 1 has a small Baseline image (height=4).
+                let mut l = text_line(12.0, 24.0);
+                l.items.push(make_image(5.0, 4.0, VerticalAlign::Baseline));
+                l
+            },
+        ];
+        recalculate_paragraph_line_boxes(&mut lines);
+
+        // Line 0: verify expansion occurred so the test is meaningful.
+        let h0 = lines[0].height;
+        assert!(approx(h0, 24.0));
+
+        // Line 1 image: computed_y = line-local img_top(4) + new_y_acc(24) = 28.
+        // image_ys covers the LineItem::Image arm; the _ => None arm is covered in
+        // recalculate_paragraph_line_boxes_expanding_line_shifts_subsequent_baseline.
+        assert!(approx(image_ys(&lines[1].items)[0], 28.0));
+    }
+}

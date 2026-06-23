@@ -183,9 +183,8 @@ fn degrade_gradients(html: &str) -> String {
 
     // Clean up leftover -webkit-background-clip: text (now useless since gradient removed)
     let clip_re = Regex::new(r"(?i)(?:-webkit-)?background-clip\s*:\s*text\s*;?").unwrap();
-    let result = clip_re.replace_all(&result, "").to_string();
 
-    result
+    clip_re.replace_all(&result, "").to_string()
 }
 
 // ── Grid → Table Conversion ─────────────────────────────────────────────
@@ -200,13 +199,14 @@ struct GridRule {
 fn parse_grid_rules(html: &str) -> Vec<GridRule> {
     let mut rules = Vec::new();
 
-    // Find all <style> blocks
     let style_re = Regex::new(r"(?s)<style[^>]*>(.*?)</style>").unwrap();
+    let rule_re = Regex::new(r"(?s)([^{]+)\s*\{\s*([^}]*)\}").unwrap();
+    let cols_re = Regex::new(r"grid-template-columns\s*:\s*([^;]+)").unwrap();
+    let gap_re = Regex::new(r"gap\s*:\s*([^;]+)").unwrap();
+
     for style_caps in style_re.captures_iter(html) {
         let css = &style_caps[1];
 
-        // Find CSS rules with display: grid
-        let rule_re = Regex::new(r"(?s)([^{]+)\s*\{\s*([^}]*)\}").unwrap();
         for rule_caps in rule_re.captures_iter(css) {
             let selectors = rule_caps[1].trim();
             let body = &rule_caps[2];
@@ -215,19 +215,15 @@ fn parse_grid_rules(html: &str) -> Vec<GridRule> {
                 continue;
             }
 
-            // Extract grid-template-columns
-            let cols_re = Regex::new(r"grid-template-columns\s*:\s*([^;]+)").unwrap();
             let columns: Vec<String> = if let Some(cols_caps) = cols_re.captures(body) {
                 cols_caps[1]
                     .split_whitespace()
                     .map(|s| s.to_string())
                     .collect()
             } else {
-                continue; // Need columns for table conversion
+                continue;
             };
 
-            // Extract gap
-            let gap_re = Regex::new(r"gap\s*:\s*([^;]+)").unwrap();
             let gap = gap_re.captures(body).map(|c| c[1].trim().to_string());
 
             rules.push(GridRule {
@@ -247,6 +243,7 @@ fn convert_grid_to_table(html: &str) -> String {
         return html.to_string();
     }
 
+    let class_re = Regex::new(r"\.([\w-]+)").unwrap();
     let mut result = html.to_string();
 
     for rule in &grid_rules {
@@ -270,7 +267,6 @@ fn convert_grid_to_table(html: &str) -> String {
         };
 
         // Match the grid container in HTML
-        let class_re = Regex::new(r"\.([\w-]+)").unwrap();
         if let Some(class_caps) = class_re.captures(&rule.selector) {
             let class_name = &class_caps[1];
             result = convert_grid_div_to_table(&result, class_name, &col_widths, &table_style);
@@ -398,10 +394,11 @@ fn find_matching_close_div(html: &str, open_pos: usize) -> Option<usize> {
     let len = bytes.len();
 
     while i < len {
-        if i + 4 <= len && &bytes[i..i + 4] == b"<div" {
-            if i + 4 >= len || bytes[i + 4].is_ascii_whitespace() || bytes[i + 4] == b'>' {
-                depth += 1;
-            }
+        if i + 4 <= len
+            && &bytes[i..i + 4] == b"<div"
+            && (i + 4 >= len || bytes[i + 4].is_ascii_whitespace() || bytes[i + 4] == b'>')
+        {
+            depth += 1;
         }
         if i + 6 <= len && &bytes[i..i + 6] == b"</div>" {
             depth -= 1;
@@ -537,28 +534,29 @@ fn parse_flex_rules(html: &str) -> Vec<FlexRule> {
     let mut rules = Vec::new();
 
     let style_re = Regex::new(r"(?s)<style[^>]*>(.*?)</style>").unwrap();
+    let rule_re = Regex::new(r"(?s)([^{]+)\s*\{\s*([^}]*)\}").unwrap();
+    let flex_re = Regex::new(r"display\s*:\s*flex").unwrap();
+    let gap_re = Regex::new(r"gap\s*:\s*([^;]+)").unwrap();
+    let align_re = Regex::new(r"align-items\s*:\s*([^;]+)").unwrap();
+    let justify_re = Regex::new(r"justify-content\s*:\s*([^;]+)").unwrap();
+
     for style_caps in style_re.captures_iter(html) {
         let css = &style_caps[1];
 
-        let rule_re = Regex::new(r"(?s)([^{]+)\s*\{\s*([^}]*)\}").unwrap();
         for rule_caps in rule_re.captures_iter(css) {
             let selectors = rule_caps[1].trim();
             let body = &rule_caps[2];
 
-            let has_flex = Regex::new(r"display\s*:\s*flex").unwrap().is_match(body);
-            if !has_flex {
+            if !flex_re.is_match(body) {
                 continue;
             }
 
-            let gap_re = Regex::new(r"gap\s*:\s*([^;]+)").unwrap();
             let gap = gap_re.captures(body).map(|c| c[1].trim().to_string());
 
             let wrap = body.contains("flex-wrap:wrap") || body.contains("flex-wrap: wrap");
 
-            let align_re = Regex::new(r"align-items\s*:\s*([^;]+)").unwrap();
             let align = align_re.captures(body).map(|c| c[1].trim().to_string());
 
-            let justify_re = Regex::new(r"justify-content\s*:\s*([^;]+)").unwrap();
             let justify = justify_re.captures(body).map(|c| c[1].trim().to_string());
 
             rules.push(FlexRule {
@@ -580,10 +578,10 @@ fn convert_flexbox_to_table(html: &str) -> String {
         return html.to_string();
     }
 
+    let class_re = Regex::new(r"\.([\w-]+)").unwrap();
     let mut result = html.to_string();
 
     for rule in &flex_rules {
-        let class_re = Regex::new(r"\.([\w-]+)").unwrap();
         if let Some(class_caps) = class_re.captures(&rule.selector) {
             let class_name = &class_caps[1];
 
@@ -610,10 +608,10 @@ fn build_flex_table_style(rule: &FlexRule) -> String {
         styles.push(format!("border-spacing:{}", gap));
     }
     styles.push("width:100%".to_string());
-    if let Some(ref justify) = rule.justify {
-        if justify == "center" {
-            styles.push("margin:0 auto".to_string());
-        }
+    if let Some(ref justify) = rule.justify
+        && justify == "center"
+    {
+        styles.push("margin:0 auto".to_string());
     }
     styles.join(";")
 }
@@ -636,7 +634,7 @@ fn convert_flex_div_to_table(
     class_name: &str,
     table_style: &str,
     td_style: &str,
-    wrap: bool,
+    _wrap: bool,
 ) -> String {
     let open_re = Regex::new(&format!(
         r#"<div\b[^>]*\bclass\s*=\s*"[^"]*\b{}\b[^"]*"[^>]*>"#,
@@ -671,13 +669,7 @@ fn convert_flex_div_to_table(
                     table_style
                 ));
 
-                // wrap: all children in one row (table cells size naturally)
-                // nowrap: one row, one child per cell
-                let cols = if wrap {
-                    children.len().max(1) // single row, let table-layout:auto determine widths
-                } else {
-                    children.len().max(1)
-                };
+                let cols = children.len().max(1);
 
                 let mut col = 0;
                 result.push_str("<tr>\n");

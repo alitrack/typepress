@@ -47,7 +47,7 @@ strip = true
 opt-level = 3
 
 [patch.crates-io]
-fulgur = { path = "/tmp/fulgur-fork" }
+fulgur = { path = "deps/fulgur" }
 
 [dev-dependencies]
 assert_cmd = "2"

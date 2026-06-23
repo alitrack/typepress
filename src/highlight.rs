@@ -70,12 +70,11 @@ fn highlight_code_blocks_inner(html: &mut String) -> Result<usize> {
 }
 
 fn extract_body(html: &str) -> String {
-    if let Some(start) = html.find("<pre") {
-        if let Some(body_start) = html[start..].find('>').map(|p| start + p + 1) {
-            if let Some(end) = html.rfind("</pre>") {
-                return html[body_start..end].to_string();
-            }
-        }
+    if let Some(start) = html.find("<pre")
+        && let Some(body_start) = html[start..].find('>').map(|p| start + p + 1)
+        && let Some(end) = html.rfind("</pre>")
+    {
+        return html[body_start..end].to_string();
     }
     html.to_string()
 }

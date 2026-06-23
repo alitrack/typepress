@@ -114,11 +114,11 @@ fn build_font_cmaps(doc: &Document) -> BTreeMap<String, CidMap> {
                 _ => continue,
             };
             // Try ToUnicode CMap
-            if let Ok(tu) = font_dict.get(b"ToUnicode") {
-                if let Ok((_, Object::Stream(stream))) = doc.dereference(tu) {
-                    let cmap = parse_tounicode_cmap(&stream.content);
-                    font_cmaps.insert(name_str, cmap);
-                }
+            if let Ok(tu) = font_dict.get(b"ToUnicode")
+                && let Ok((_, Object::Stream(stream))) = doc.dereference(tu)
+            {
+                let cmap = parse_tounicode_cmap(&stream.content);
+                font_cmaps.insert(name_str, cmap);
             }
         }
         let _ = page_num; // suppress unused warning
@@ -134,10 +134,10 @@ fn resolve_page_resources(doc: &Document, page_id: lopdf::ObjectId) -> Option<lo
             Ok(Object::Dictionary(d)) => d.clone(),
             _ => return None,
         };
-        if let Ok(res) = dict.get(b"Resources") {
-            if let Ok((_, Object::Dictionary(resources))) = doc.dereference(res) {
-                return Some(resources.clone());
-            }
+        if let Ok(res) = dict.get(b"Resources")
+            && let Ok((_, Object::Dictionary(resources))) = doc.dereference(res)
+        {
+            return Some(resources.clone());
         }
         match dict.get(b"Parent").and_then(|p| p.as_reference()) {
             Ok(parent_id) if parent_id != current_id => current_id = parent_id,
@@ -328,59 +328,59 @@ pub fn extract_unicode_text(doc: &Document) -> Result<Vec<UnicodeTextItem>> {
                     ty = ctm[1] * tlm_e + ctm[3] * tlm_f + ctm[5];
                 }
                 "Tj" => {
-                    if let Some(text_obj) = operands.first() {
-                        if let Ok(bytes) = text_obj.as_str() {
-                            let cmap = font_cmaps.get(&font_name);
-                            let text = if let Some(c) = cmap {
-                                decode_with_cmap(bytes, c)
-                            } else {
-                                bytes.iter().map(|&b| b as char).collect()
-                            };
-                            if !text.trim().is_empty() {
-                                let w = estimate_width(&text, font_size);
-                                items.push(UnicodeTextItem {
-                                    page: page_num,
-                                    x: tx,
-                                    y: ty,
-                                    width: w,
-                                    height: font_size,
-                                    text,
-                                    font: font_name.clone(),
-                                    font_size,
-                                });
-                                tx += w;
-                            }
+                    if let Some(text_obj) = operands.first()
+                        && let Ok(bytes) = text_obj.as_str()
+                    {
+                        let cmap = font_cmaps.get(&font_name);
+                        let text = if let Some(c) = cmap {
+                            decode_with_cmap(bytes, c)
+                        } else {
+                            bytes.iter().map(|&b| b as char).collect()
+                        };
+                        if !text.trim().is_empty() {
+                            let w = estimate_width(&text, font_size);
+                            items.push(UnicodeTextItem {
+                                page: page_num,
+                                x: tx,
+                                y: ty,
+                                width: w,
+                                height: font_size,
+                                text,
+                                font: font_name.clone(),
+                                font_size,
+                            });
+                            tx += w;
                         }
                     }
                 }
                 "TJ" => {
-                    if let Some(array_obj) = operands.first() {
-                        if let Ok(array) = array_obj.as_array() {
-                            let cmap = font_cmaps.get(&font_name);
-                            let mut combined = String::new();
-                            for elem in array {
-                                if let Ok(bytes) = elem.as_str() {
-                                    if let Some(c) = cmap {
-                                        combined.push_str(&decode_with_cmap(bytes, c));
-                                    } else {
-                                        combined.extend(bytes.iter().map(|&b| b as char));
-                                    }
+                    if let Some(array_obj) = operands.first()
+                        && let Ok(array) = array_obj.as_array()
+                    {
+                        let cmap = font_cmaps.get(&font_name);
+                        let mut combined = String::new();
+                        for elem in array {
+                            if let Ok(bytes) = elem.as_str() {
+                                if let Some(c) = cmap {
+                                    combined.push_str(&decode_with_cmap(bytes, c));
+                                } else {
+                                    combined.extend(bytes.iter().map(|&b| b as char));
                                 }
                             }
-                            if !combined.trim().is_empty() {
-                                let w = estimate_width(&combined, font_size);
-                                items.push(UnicodeTextItem {
-                                    page: page_num,
-                                    x: tx,
-                                    y: ty,
-                                    width: w,
-                                    height: font_size,
-                                    text: combined,
-                                    font: font_name.clone(),
-                                    font_size,
-                                });
-                                tx += w;
-                            }
+                        }
+                        if !combined.trim().is_empty() {
+                            let w = estimate_width(&combined, font_size);
+                            items.push(UnicodeTextItem {
+                                page: page_num,
+                                x: tx,
+                                y: ty,
+                                width: w,
+                                height: font_size,
+                                text: combined,
+                                font: font_name.clone(),
+                                font_size,
+                            });
+                            tx += w;
                         }
                     }
                 }
@@ -449,14 +449,12 @@ fn get_page_width(doc: &Document, page_num: u32) -> f32 {
         if pn != page_num {
             continue;
         }
-        if let Ok(Object::Dictionary(d)) = doc.get_object(page_id) {
-            if let Ok(bbox) = d.get(b"MediaBox") {
-                if let Ok(arr) = bbox.as_array() {
-                    if arr.len() >= 4 {
-                        return obj_to_f32(&arr[2]) - obj_to_f32(&arr[0]);
-                    }
-                }
-            }
+        if let Ok(Object::Dictionary(d)) = doc.get_object(page_id)
+            && let Ok(bbox) = d.get(b"MediaBox")
+            && let Ok(arr) = bbox.as_array()
+            && arr.len() >= 4
+        {
+            return obj_to_f32(&arr[2]) - obj_to_f32(&arr[0]);
         }
     }
     595.0 // A4 default
@@ -467,14 +465,12 @@ fn get_page_height(doc: &Document, page_num: u32) -> f32 {
         if pn != page_num {
             continue;
         }
-        if let Ok(Object::Dictionary(d)) = doc.get_object(page_id) {
-            if let Ok(bbox) = d.get(b"MediaBox") {
-                if let Ok(arr) = bbox.as_array() {
-                    if arr.len() >= 4 {
-                        return obj_to_f32(&arr[3]) - obj_to_f32(&arr[1]);
-                    }
-                }
-            }
+        if let Ok(Object::Dictionary(d)) = doc.get_object(page_id)
+            && let Ok(bbox) = d.get(b"MediaBox")
+            && let Ok(arr) = bbox.as_array()
+            && arr.len() >= 4
+        {
+            return obj_to_f32(&arr[3]) - obj_to_f32(&arr[1]);
         }
     }
     842.0
