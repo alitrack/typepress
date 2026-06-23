@@ -447,8 +447,12 @@ fn extract_direct_children_divs(body: &str) -> Vec<String> {
                     te += 1;
                 }
                 let tname = &bytes[tag_start..te];
-                if tname == b"br" || tname == b"hr" || tname == b"img"
-                    || tname == b"input" || tname == b"meta" || tname == b"link"
+                if tname == b"br"
+                    || tname == b"hr"
+                    || tname == b"img"
+                    || tname == b"input"
+                    || tname == b"meta"
+                    || tname == b"link"
                 {
                     while i < len && bytes[i] != b'>' {
                         i += 1;
@@ -479,7 +483,8 @@ fn extract_direct_children_divs(body: &str) -> Vec<String> {
             let cb = close.as_bytes();
             while i < len {
                 if bytes[i] == b'<'
-                    && i + 1 < len && bytes[i + 1] == b'/'
+                    && i + 1 < len
+                    && bytes[i + 1] == b'/'
                     && i + cb.len() <= len
                     && &bytes[i..i + cb.len()] == cb
                 {
@@ -488,9 +493,7 @@ fn extract_direct_children_divs(body: &str) -> Vec<String> {
                     if depth == 0 {
                         break;
                     }
-                } else if bytes[i] == b'<'
-                    && i + 1 < len && bytes[i + 1].is_ascii_alphabetic()
-                {
+                } else if bytes[i] == b'<' && i + 1 < len && bytes[i + 1].is_ascii_alphabetic() {
                     let mut nt = i + 1;
                     while nt < len && bytes[nt].is_ascii_alphanumeric() {
                         nt += 1;
