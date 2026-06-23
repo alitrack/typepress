@@ -11,9 +11,9 @@ cssparser = "0.37"
 krilla = "0.7.0"
 krilla-svg = "0.7.0"
 usvg = "0.45"
-blitz-html = { path = "/tmp/blitz/packages/blitz-html" }
-blitz-dom = { path = "/tmp/blitz/packages/blitz-dom", features = ["floats"] }
-blitz-traits = { path = "/tmp/blitz/packages/blitz-traits" }
+blitz-html = "0.3.0-alpha.6"
+blitz-dom = { version = "0.3.0-alpha.6", features = ["floats"] }
+blitz-traits = "0.3.0-alpha.6"
 taffy = { version = "=0.11.0-experimental-cache-fix.3", features = ["float_layout"] }
 parley = "0.10"
 skrifa = "0.42"

@@ -228,7 +228,9 @@ dependencies = [
 
 [[package]]
 name = "blitz-dom"
-version = "0.3.0-alpha.5"
+version = "0.3.0-alpha.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0992bd73891039d327374ae9f9148477cd23c898ef33b0930229c06cd077b20"
 dependencies = [
  "accesskit",
  "anyrender",
@@ -270,7 +272,9 @@ dependencies = [
 
 [[package]]
 name = "blitz-html"
-version = "0.3.0-alpha.5"
+version = "0.3.0-alpha.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c810def613914a5c80fec3784f46a22255aa666c388599d785de57a81f8f92b"
 dependencies = [
  "blitz-dom",
  "blitz-traits",
@@ -280,7 +284,9 @@ dependencies = [
 
 [[package]]
 name = "blitz-traits"
-version = "0.3.0-alpha.5"
+version = "0.3.0-alpha.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e212f04e3d2a53081c73d6f287c2f520442408239dba51b5f73fbf5537064343"
 dependencies = [
  "bitflags 2.13.0",
  "bytes",
@@ -762,6 +768,8 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 [[package]]
 name = "debug_timer"
 version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da220af51a1a335e9a930beaaef53d261e41ea9eecfb3d973a3ddae1a7284b9c"
 
 [[package]]
 name = "defmt"
@@ -3398,7 +3406,9 @@ dependencies = [
 
 [[package]]
 name = "stylo_taffy"
-version = "0.3.0-alpha.5"
+version = "0.3.0-alpha.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "51ab273452a622bf33717d66a70e8ff68d193800072ffe1e423e9073577b4bc9"
 dependencies = [
  "stylo",
  "stylo_atoms",
