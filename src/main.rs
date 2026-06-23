@@ -24,104 +24,122 @@ use typepress::{inject_header_footer, markdown_to_html};
 // ── CLI ────────────────────────────────────────────────────────────────
 
 #[derive(Parser)]
-#[command(name = "typepress", version, about = "Pure Rust HTML/CSS → PDF engine")]
+#[command(name = "typepress", version, about = "Pure Rust HTML/CSS → PDF engine\n\nwkhtmltopdf compatible — use as a drop-in replacement.")]
 struct Cli {
     /// Input HTML file (omit for --stdin)
     input: Option<PathBuf>,
-
     /// Read HTML from stdin
     #[arg(long)]
     stdin: bool,
-
     /// Output PDF file path (use "-" for stdout). Required in CLI mode, optional with --config.
     #[arg(short, long)]
     output: Option<PathBuf>,
-
-    // ── Input format ──
-    /// Input format: html (default) or md (markdown)
+    // Input format
     #[arg(long = "from", default_value = "html")]
     from: String,
-
-    // ── Output format ──
-    /// Output format: pdf (default), svg, or png
+    // Output format
     #[arg(long = "format", short = 'F', default_value = "pdf")]
     format: String,
-
-    /// Scale factor for PNG output (default: 2.0 for retina)
     #[arg(long, default_value = "2.0")]
     scale: f32,
-
-    // ── Config ──
-    /// YAML config file (auto-detects typepress.yaml if omitted)
+    // Config
     #[arg(short = 'c', long)]
     config: Option<PathBuf>,
-
-    // ── Page ──
-    /// Page size: A4, Letter, A3, etc.
-    #[arg(short, long)]
+    // Page: size
+    #[arg(short = 's', long, alias = "page-size")]
     size: Option<String>,
-
-    /// Landscape orientation
-    #[arg(short, long)]
+    #[arg(long = "page-width", conflicts_with = "size")]
+    page_width: Option<String>,
+    #[arg(long = "page-height", conflicts_with = "size")]
+    page_height: Option<String>,
+    #[arg(short = 'l', long)]
     landscape: bool,
-
-    /// Page margins in mm (CSS shorthand: "20" or "10 20 30 40")
-    #[arg(long)]
+    #[arg(short = 'O', long)]
+    orientation: Option<String>,
+    // Page: margins (wkhtmltopdf compat)
+    #[arg(long = "margin")]
     margin: Option<String>,
-
-    /// Fit content to one page by uniform CSS scaling.
-    /// Renders first, counts pages, then globally scales CSS px values.
+    #[arg(short = 'T', long = "margin-top")]
+    margin_top: Option<String>,
+    #[arg(short = 'B', long = "margin-bottom")]
+    margin_bottom: Option<String>,
+    #[arg(short = 'L', long = "margin-left")]
+    margin_left: Option<String>,
+    #[arg(short = 'R', long = "margin-right")]
+    margin_right: Option<String>,
+    // Zoom
+    #[arg(long = "zoom", default_value = "1.0")]
+    zoom: f32,
     #[arg(long)]
     fit: bool,
-
-    // ── Metadata ──
+    // Metadata
     #[arg(long)]
     title: Option<String>,
     #[arg(long = "author")]
     authors: Vec<String>,
     #[arg(long)]
     language: Option<String>,
-
-    // ── Assets ──
-    /// Font files to bundle (TTF/OTF/WOFF2). Repeatable.
+    // Assets
     #[arg(long = "font", short = 'f')]
     fonts: Vec<PathBuf>,
-
-    /// CSS files to include. Repeatable.
-    #[arg(long = "css")]
+    #[arg(long = "css", alias = "user-style-sheet")]
     css_files: Vec<PathBuf>,
-
-    // ── Headers & Footers ──
-    /// Header text (top-center, every page)
-    #[arg(long)]
+    // Headers & Footers
+    #[arg(long = "header", alias = "header-html")]
     header: Option<String>,
-
-    /// Footer text (bottom-center, every page)
-    #[arg(long)]
+    #[arg(long = "footer", alias = "footer-html")]
     footer: Option<String>,
-
-    // ── LaTeX Math ──
-    /// Auto-detect and load KaTeX math fonts from npm/system paths.
-    /// Renders $...$ (inline) and $$...$$ (display) math via katex-rs.
+    // wkhtmltopdf compat no-ops
+    #[arg(long, hide = true)]
+    encoding: Option<String>,
+    #[arg(long = "no-outline")]
+    no_outline: bool,
+    #[arg(short = 'q', long = "quiet")]
+    quiet: bool,
+    // Math
     #[arg(long)]
     math: bool,
-
-    /// Explicit directory containing KaTeX font files (WOFF2/TTF/OTF).
     #[arg(long = "math-dir")]
     math_dir: Option<PathBuf>,
-
-    // ── PDF features ──
+    // PDF features
     #[arg(long)]
     bookmarks: bool,
     #[arg(long)]
     tagged: bool,
     #[arg(long = "pdf-ua")]
     pdf_ua: bool,
-
-    /// Disable system fonts (use only explicitly loaded --font fonts)
     #[arg(long = "no-system-fonts")]
     no_system_fonts: bool,
 }
+
+impl Cli {
+    fn resolve_margin(&self) -> Option<Margin> {
+        let has_side = self.margin_top.is_some()
+            || self.margin_bottom.is_some()
+            || self.margin_left.is_some()
+            || self.margin_right.is_some();
+        if has_side {
+            let top = self.margin_top.as_deref().and_then(|s| parse_length_mm(s).ok()).unwrap_or(20.0);
+            let bottom = self.margin_bottom.as_deref().and_then(|s| parse_length_mm(s).ok()).unwrap_or(20.0);
+            let left = self.margin_left.as_deref().and_then(|s| parse_length_mm(s).ok()).unwrap_or(10.0);
+            let right = self.margin_right.as_deref().and_then(|s| parse_length_mm(s).ok()).unwrap_or(10.0);
+            let to_pt = |mm: f32| mm * 72.0 / 25.4;
+            return Some(Margin { top: to_pt(top), bottom: to_pt(bottom), left: to_pt(left), right: to_pt(right) });
+        }
+        self.margin.as_deref().map(parse_margin)
+    }
+    fn resolve_landscape(&self) -> bool {
+        if let Some(ref o) = self.orientation {
+            o.eq_ignore_ascii_case("landscape")
+        } else { self.landscape }
+    }
+    fn resolve_size(&self) -> Option<String> {
+        if let (Some(w), Some(h)) = (self.page_width.as_ref(), self.page_height.as_ref()) {
+            Some(format!("{} {}", w, h))
+        } else { self.size.clone() }
+    }
+}
+
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -146,13 +164,14 @@ fn parse_page_size(s: &str) -> PageSize {
 }
 
 fn parse_margin(s: &str) -> Margin {
-    let values: Vec<f32> = s
+    let values: Vec<std::result::Result<f32, _>> = s
         .split_whitespace()
-        .filter_map(|v| v.parse().ok())
+        .map(parse_length_mm)
         .collect();
-    if values.is_empty() {
+    if values.is_empty() || values.iter().all(|v| v.is_err()) {
         return Margin::default();
     }
+    let values: Vec<f32> = values.into_iter().map(|v| v.unwrap_or(20.0)).collect();
     let to_pt = |mm: f32| mm * 72.0 / 25.4;
     match values.as_slice() {
         [all] => Margin::uniform(to_pt(*all)),
@@ -171,6 +190,29 @@ fn parse_margin(s: &str) -> Margin {
         },
         _ => Margin::default(),
     }
+}
+
+/// Parse a CSS length to millimeters. Supports mm, cm, in, pt, px suffixes.
+/// Plain numbers are treated as mm.
+fn parse_length_mm(s: &str) -> std::result::Result<f32, &'static str> {
+    let s = s.trim();
+    if let Some(val) = s.strip_suffix("mm") {
+        return val.trim().parse::<f32>().map_err(|_| "invalid mm");
+    }
+    if let Some(val) = s.strip_suffix("cm") {
+        return val.trim().parse::<f32>().map(|v| v * 10.0).map_err(|_| "invalid cm");
+    }
+    if let Some(val) = s.strip_suffix("in") {
+        return val.trim().parse::<f32>().map(|v| v * 25.4).map_err(|_| "invalid in");
+    }
+    if let Some(val) = s.strip_suffix("pt") {
+        return val.trim().parse::<f32>().map(|v| v * 25.4 / 72.0).map_err(|_| "invalid pt");
+    }
+    if let Some(val) = s.strip_suffix("px") {
+        return val.trim().parse::<f32>().map(|v| v * 25.4 / 96.0).map_err(|_| "invalid px");
+    }
+    // Plain number → treat as mm
+    s.parse::<f32>().map_err(|_| "invalid number")
 }
 
 // ── Markdown Processing ────────────────────────────────────────────────
@@ -1051,6 +1093,10 @@ fn main() -> Result<()> {
     };
 
     // Merge: CLI args override YAML values.
+    // Resolve page settings early (before cli partial-moves)
+    let resolved_size = cli.resolve_size();
+    let resolved_landscape = cli.resolve_landscape();
+    let resolved_margin = cli.resolve_margin();
     let input_file = cli
         .input
         .clone()
@@ -1213,6 +1259,25 @@ fn main() -> Result<()> {
         // 0a. CSS Layout: using native blitz-html 0.3 (flex/grid → taffy natively)
         // (old Grid→Table preprocessing removed — no longer needed)
 
+        // 0b. Network resources: download remote CSS <link> + <img>
+        match typepress::network::inject_remote_css(&mut html) {
+            Ok(n) if n > 0 => eprintln!("Downloaded {n} remote CSS file(s)"),
+            Ok(_) => {}
+            Err(e) => eprintln!("Warning: remote CSS: {e}"),
+        }
+        if let Some(ref bp) = base_path {
+            match typepress::network::inject_local_css(&mut html, bp) {
+                Ok(n) if n > 0 => eprintln!("Embedded {n} local CSS file(s)"),
+                Ok(_) => {}
+                Err(e) => eprintln!("Warning: local CSS: {e}"),
+            }
+        }
+        match typepress::network::download_remote_images(&mut html) {
+            Ok((n, _)) if n > 0 => eprintln!("Downloaded {n} remote image(s)"),
+            Ok(_) => {}
+            Err(e) => eprintln!("Warning: remote images: {e}"),
+        }
+
         // 1. Inject header/footer
         header_css = inject_header_footer(&mut html, header.as_deref(), footer.as_deref());
 
@@ -1314,17 +1379,17 @@ fn main() -> Result<()> {
     }
     if let Some(ref c) = cfg {
         if let Some(ref pc) = c.page {
-            if cli.size.is_none()
+            if resolved_size.is_none()
                 && let Some(ref size) = pc.size
             {
                 builder = builder.page_size(parse_page_size(size));
             }
-            if !cli.landscape
+            if !resolved_landscape
                 && let Some(ls) = pc.landscape
             {
                 builder = builder.landscape(ls);
             }
-            if cli.margin.is_none()
+            if resolved_margin.is_none()
                 && let Some(ref margin) = pc.margin
             {
                 builder = builder.margin(parse_margin(margin));
@@ -1365,15 +1430,28 @@ fn main() -> Result<()> {
     }
 
     // ── CLI args (override YAML or set directly) ──
-    if let Some(ref s) = cli.size {
+    if let Some(ref s) = resolved_size {
+        // Custom page-size: "W H" or standard "A4"
         builder = builder.page_size(parse_page_size(s));
     }
-    if cli.landscape {
+    let landscape = resolved_landscape;
+    if landscape {
         builder = builder.landscape(true);
     }
-    if let Some(ref m) = cli.margin {
-        builder = builder.margin(parse_margin(m));
+    if let Some(m) = resolved_margin {
+        builder = builder.margin(m);
     }
+    // --zoom: scale CSS by wrapping content with transform
+    if (cli.zoom - 1.0).abs() > f32::EPSILON {
+        html = format!(
+            "<div style=\"transform:scale({});transform-origin:top left;width:{}%;\">{}</div>",
+            cli.zoom,
+            (100.0 / cli.zoom) as u32,
+            html
+        );
+    }
+    // --no-outline: invert bookmarks default
+    let bookmarks = if cli.no_outline { false } else { cli.bookmarks };
     if let Some(t) = cli.title {
         builder = builder.title(t);
     }
@@ -1384,7 +1462,7 @@ fn main() -> Result<()> {
         builder = builder.lang(l);
     }
     builder = builder
-        .bookmarks(cli.bookmarks)
+        .bookmarks(bookmarks)
         .tagged(cli.tagged)
         .pdf_ua(cli.pdf_ua);
     if let Some(ref bp) = base_path {

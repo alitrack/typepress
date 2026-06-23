@@ -5,6 +5,7 @@ pub mod css;
 pub mod css_layout;
 pub mod fonts;
 pub mod highlight;
+pub mod network;
 pub mod svg;
 
 use anyhow::Result;
