@@ -16,7 +16,7 @@ katex = { package = "katex-rs", version = "0.2" }
 # Regex for math detection
 regex = "1"
 # Mermaid diagram rendering (optional)
-mermaid-rs = { version = "0.1", path = "../mermaid-rs", optional = true }
+mermaid-render = { version = "0.1", path = "../mermaid-render", optional = true }
 # Markdown input
 pulldown-cmark = "0.13"
 # Multi-format output (PNG rasterization)
@@ -39,7 +39,7 @@ env_logger = "0.11"
 
 [features]
 default = []
-mermaid = ["dep:mermaid-rs"]
+mermaid-render = ["dep:mermaid-render"]
 
 [profile.release]
 lto = true

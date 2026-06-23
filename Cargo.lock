@@ -2040,7 +2040,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38d1115007560874e373613744c6fba374c17688327a71c1476d1a5954cc857b"
 
 [[package]]
-name = "mermaid-rs"
+name = "mermaid-render"
 version = "0.1.2"
 
 [[package]]
@@ -3960,7 +3960,7 @@ dependencies = [
  "katex-rs",
  "log",
  "lopdf",
- "mermaid-rs",
+ "mermaid-render",
  "noyalib",
  "predicates",
  "pulldown-cmark",

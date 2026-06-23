@@ -629,7 +629,7 @@ fn math_fallback_markup(latex: &str, display_mode: bool) -> String {
     format!(r#"<span class="{class}">{}</span>"#, escape_html(latex))
 }
 
-#[cfg(feature = "mermaid")]
+#[cfg(feature = "mermaid-render")]
 fn detect_mermaid_system_font(prefer_cjk: bool) -> Option<(PathBuf, &'static str)> {
     let cjk_candidates: &[(&str, &str)] = &[
         (
@@ -738,9 +738,9 @@ fn process_math(html: &mut String) -> Result<usize> {
 
 // ── Mermaid Processing ─────────────────────────────────────────────────
 
-#[cfg(feature = "mermaid")]
+#[cfg(feature = "mermaid-render")]
 fn process_mermaid(html: &mut String) -> Result<usize> {
-    use mermaid_rs::{EstimatedMeasure, render_diagram};
+    use mermaid_render::{EstimatedMeasure, render_diagram};
 
     let re = Regex::new(r"(?s)```mermaid\r?\n(.*?)```")?;
     let mut count = 0usize;
@@ -757,7 +757,7 @@ fn process_mermaid(html: &mut String) -> Result<usize> {
 
     for (range, source) in matches.into_iter().rev() {
         let mermaid_font = detect_mermaid_system_font(source.chars().any(|c| !c.is_ascii()));
-        let mut style = mermaid_rs::DiagramStyle::default();
+        let mut style = mermaid_render::DiagramStyle::default();
         if let Some((_, family)) = mermaid_font.as_ref() {
             style.font_family = (*family).to_string();
         }
@@ -1138,7 +1138,7 @@ fn main() -> Result<()> {
         // MD pipeline: Mermaid → Math → Markdown→HTML → Header/Footer → Highlight
 
         // 0a. Mermaid (raw markdown)
-        #[cfg(feature = "mermaid")]
+        #[cfg(feature = "mermaid-render")]
         match process_mermaid(&mut html) {
             Ok(n) if n > 0 => eprintln!("Rendered {n} mermaid diagram(s)"),
             Err(e) => eprintln!("Warning: mermaid processing failed: {e}"),
@@ -1208,7 +1208,7 @@ fn main() -> Result<()> {
         }
 
         // 3. Mermaid
-        #[cfg(feature = "mermaid")]
+        #[cfg(feature = "mermaid-render")]
         match process_mermaid(&mut html) {
             Ok(n) if n > 0 => eprintln!("Rendered {n} mermaid diagram(s)"),
             Err(e) => eprintln!("Warning: mermaid processing failed: {e}"),
@@ -1485,7 +1485,7 @@ mod preprocess_tests {
     }
 
     #[test]
-    #[cfg(feature = "mermaid")]
+    #[cfg(feature = "mermaid-render")]
     fn process_mermaid_generates_inline_svg() {
         let mut markdown = String::from("```mermaid\ngraph TD\n  A --> B\n```");
         let rendered = process_mermaid(&mut markdown).unwrap();
