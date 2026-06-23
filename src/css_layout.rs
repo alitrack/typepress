@@ -183,9 +183,9 @@ fn degrade_gradients(html: &str) -> String {
 
     // Clean up leftover -webkit-background-clip: text (now useless since gradient removed)
     let clip_re = Regex::new(r"(?i)(?:-webkit-)?background-clip\s*:\s*text\s*;?").unwrap();
-    let result = clip_re.replace_all(&result, "").to_string();
+    
 
-    result
+    clip_re.replace_all(&result, "").to_string()
 }
 
 // ── Grid → Table Conversion ─────────────────────────────────────────────
@@ -398,11 +398,10 @@ fn find_matching_close_div(html: &str, open_pos: usize) -> Option<usize> {
     let len = bytes.len();
 
     while i < len {
-        if i + 4 <= len && &bytes[i..i + 4] == b"<div" {
-            if i + 4 >= len || bytes[i + 4].is_ascii_whitespace() || bytes[i + 4] == b'>' {
+        if i + 4 <= len && &bytes[i..i + 4] == b"<div"
+            && (i + 4 >= len || bytes[i + 4].is_ascii_whitespace() || bytes[i + 4] == b'>') {
                 depth += 1;
             }
-        }
         if i + 6 <= len && &bytes[i..i + 6] == b"</div>" {
             depth -= 1;
             if depth == 0 {
@@ -563,11 +562,10 @@ fn build_flex_table_style(rule: &FlexRule) -> String {
         styles.push(format!("border-spacing:{}", gap));
     }
     styles.push("width:100%".to_string());
-    if let Some(ref justify) = rule.justify {
-        if justify == "center" {
+    if let Some(ref justify) = rule.justify
+        && justify == "center" {
             styles.push("margin:0 auto".to_string());
         }
-    }
     styles.join(";")
 }
 

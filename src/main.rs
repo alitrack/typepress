@@ -464,11 +464,10 @@ fn math_node_to_html(node: &katex::mathml_tree::MathNode) -> String {
         MathNodeType::Msup => {
             let base = math_child_html(node, 0);
             let sup = math_child_html(node, 1);
-            if let Some(base_text) = math_child_plain_text(node, 0) {
-                if is_large_operator_text(&base_text) {
+            if let Some(base_text) = math_child_plain_text(node, 0)
+                && is_large_operator_text(&base_text) {
                     return render_large_operator_limits(&base, Some(&sup), None);
                 }
-            }
             if let Some(sup_text) = math_child_plain_text(node, 1) {
                 format!("{base}{}", render_superscript_text(&sup_text))
             } else {
@@ -478,11 +477,10 @@ fn math_node_to_html(node: &katex::mathml_tree::MathNode) -> String {
         MathNodeType::Msub => {
             let base = math_child_html(node, 0);
             let sub = math_child_html(node, 1);
-            if let Some(base_text) = math_child_plain_text(node, 0) {
-                if is_large_operator_text(&base_text) {
+            if let Some(base_text) = math_child_plain_text(node, 0)
+                && is_large_operator_text(&base_text) {
                     return render_large_operator_limits(&base, None, Some(&sub));
                 }
-            }
             if let Some(sub_text) =
                 math_child_plain_text(node, 1).and_then(|text| unicode_subscript(&text))
             {
@@ -495,11 +493,10 @@ fn math_node_to_html(node: &katex::mathml_tree::MathNode) -> String {
             let base = math_child_html(node, 0);
             let sub = math_child_html(node, 1);
             let sup = math_child_html(node, 2);
-            if let Some(base_text) = math_child_plain_text(node, 0) {
-                if is_large_operator_text(&base_text) {
+            if let Some(base_text) = math_child_plain_text(node, 0)
+                && is_large_operator_text(&base_text) {
                     return render_large_operator_limits(&base, Some(&sup), Some(&sub));
                 }
-            }
             let sub_text = math_child_plain_text(node, 1).and_then(|text| unicode_subscript(&text));
             let sup_text = math_child_plain_text(node, 2);
             if let Some(sub_text) = sub_text {
@@ -754,7 +751,7 @@ fn process_mermaid(html: &mut String) -> Result<usize> {
         .collect();
 
     for (range, source) in matches.into_iter().rev() {
-        let mermaid_font = detect_mermaid_system_font(source.chars().any(|c| !c.is_ascii()));
+        let mermaid_font = detect_mermaid_system_font(!source.is_ascii());
         let mut style = mermaid_rs::DiagramStyle::default();
         if let Some((_, family)) = mermaid_font.as_ref() {
             style.font_family = (*family).to_string();
@@ -892,11 +889,10 @@ fn find_katex_fonts_in(dir: &Path, depth: usize, max: usize) -> Option<PathBuf> 
             if nested.is_dir() {
                 return Some(nested);
             }
-            if entry.path().is_dir() {
-                if let Some(found) = find_katex_fonts_in(&entry.path(), depth + 1, max) {
+            if entry.path().is_dir()
+                && let Some(found) = find_katex_fonts_in(&entry.path(), depth + 1, max) {
                     return Some(found);
                 }
-            }
         }
     }
     None
@@ -1039,7 +1035,7 @@ fn main() -> Result<()> {
         || input_file
             .as_ref()
             .and_then(|p| p.extension())
-            .map_or(false, |e| e == "md")
+            .is_some_and(|e| e == "md")
         || cfg.as_ref().and_then(|c| c.from.as_deref()) == Some("md");
     let header = cli
         .header
@@ -1070,10 +1066,10 @@ fn main() -> Result<()> {
     let is_pdf_input = input_file
         .as_ref()
         .and_then(|p| p.extension())
-        .map_or(false, |e| e == "pdf");
+        .is_some_and(|e| e == "pdf");
     if is_pdf_input && !cli.stdin {
         let pdf_bytes = std::fs::read(input_file.as_ref().unwrap())?;
-        let to_stdout = cli.output.as_ref().map_or(false, |o| o.as_os_str() == "-");
+        let to_stdout = cli.output.as_ref().is_some_and(|o| o.as_os_str() == "-");
         if to_stdout {
             match cli.format.as_str() {
                 "svg" => print!("{}", render_svg_from_pdf(&pdf_bytes)?),
@@ -1289,53 +1285,45 @@ fn main() -> Result<()> {
     // ── Merge YAML config (CLI args override YAML) ──
     if let Some(ref c) = cfg {
         if let Some(ref pc) = c.page {
-            if cli.size.is_none() {
-                if let Some(ref size) = pc.size {
+            if cli.size.is_none()
+                && let Some(ref size) = pc.size {
                     builder = builder.page_size(parse_page_size(size));
                 }
-            }
-            if !cli.landscape {
-                if let Some(ls) = pc.landscape {
+            if !cli.landscape
+                && let Some(ls) = pc.landscape {
                     builder = builder.landscape(ls);
                 }
-            }
-            if cli.margin.is_none() {
-                if let Some(ref margin) = pc.margin {
+            if cli.margin.is_none()
+                && let Some(ref margin) = pc.margin {
                     builder = builder.margin(parse_margin(margin));
                 }
-            }
         }
         if let Some(ref mc) = c.metadata {
-            if cli.title.is_none() {
-                if let Some(ref title) = mc.title {
+            if cli.title.is_none()
+                && let Some(ref title) = mc.title {
                     builder = builder.title(title.clone());
                 }
-            }
             if cli.authors.is_empty() && !mc.author.is_empty() {
                 builder = builder.authors(mc.author.clone());
             }
-            if cli.language.is_none() {
-                if let Some(ref lang) = mc.language {
+            if cli.language.is_none()
+                && let Some(ref lang) = mc.language {
                     builder = builder.lang(lang.clone());
                 }
-            }
         }
         if let Some(ref pdf_cfg) = c.pdf {
-            if !cli.bookmarks {
-                if let Some(bm) = pdf_cfg.bookmarks {
+            if !cli.bookmarks
+                && let Some(bm) = pdf_cfg.bookmarks {
                     builder = builder.bookmarks(bm);
                 }
-            }
-            if !cli.tagged {
-                if let Some(tg) = pdf_cfg.tagged {
+            if !cli.tagged
+                && let Some(tg) = pdf_cfg.tagged {
                     builder = builder.tagged(tg);
                 }
-            }
-            if !cli.pdf_ua {
-                if let Some(ua) = pdf_cfg.pdf_ua {
+            if !cli.pdf_ua
+                && let Some(ua) = pdf_cfg.pdf_ua {
                     builder = builder.pdf_ua(ua);
                 }
-            }
         }
     }
 
@@ -1373,10 +1361,10 @@ fn main() -> Result<()> {
     let pdf = engine.render_html(&html)?;
 
     // 5. Route output by format. YAML config triggers multi-format.
-    let to_stdout = cli.output.as_ref().map_or(false, |o| o.as_os_str() == "-");
+    let to_stdout = cli.output.as_ref().is_some_and(|o| o.as_os_str() == "-");
 
     // Config-driven multi-format output (from YAML output section)
-    if let Some(ref oc) = cfg.as_ref().and_then(|c| c.output.as_ref()) {
+    if let Some(oc) = cfg.as_ref().and_then(|c| c.output.as_ref()) {
         if let Some(ref path) = oc.pdf {
             std::fs::write(path, &pdf)?;
             eprintln!("PDF written to {}", path.display());
@@ -1411,7 +1399,7 @@ fn main() -> Result<()> {
         let yaml_has_format = cfg
             .as_ref()
             .and_then(|c| c.output.as_ref())
-            .map_or(false, |oc| match cli.format.as_str() {
+            .is_some_and(|oc| match cli.format.as_str() {
                 "svg" => oc.svg.is_some(),
                 "png" => oc.png.is_some(),
                 _ => oc.pdf.is_some(),
