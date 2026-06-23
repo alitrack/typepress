@@ -1,6 +1,6 @@
 [package]
 name = "typepress"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 description = "Pure Rust HTML/CSS → PDF/SVG/PNG engine. No browser required."
 license = "MIT OR Apache-2.0"

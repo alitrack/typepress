@@ -17,6 +17,23 @@
 ### Fixed
 - KaTeX CSS: removed `display: inline-flex` and `flex-direction` (taffy-incompatible)
 
+## [0.3.2] — 2026-06-24
+
+### Changed
+- fulgur fork upgraded to blitz-html 0.3 (native CSS flex/grid layout)
+- COLR color emoji support via krilla 0.7
+- CSS Layout preprocessor removed — blitz-html 0.3 natively handles flex/grid
+
+### Added
+- `--font` CLI option for custom font files (Unifont COLR emoji, CJK)
+- CI: `fonts-noto-cjk` for reftest CJK coverage
+- `agent-knowledge-map.html` knowledge graph layout test case
+
+### Fixed
+- CI: `libfontconfig-dev` dependency for Linux builds
+- Clippy warnings resolved across workspace (28 warnings)
+- Version alignment: Cargo.toml, pyproject.toml, package.json, Python/Node in-code VERSION
+
 ## [0.3.0] — 2026-06-22
 
 ### Added
