@@ -25,6 +25,7 @@ enum CidEncoding {
 struct FontInfo {
     cmap: CidMap,
     encoding: CidEncoding,
+    base_name: String,
 }
 
 /// Parse a ToUnicode CMap stream and return a CID→char mapping.
@@ -148,6 +149,13 @@ fn build_font_cmaps(doc: &Document) -> BTreeMap<String, FontInfo> {
                 .and_then(|s| s.as_name().ok())
                 .is_some_and(|n| n == b"Type3");
 
+            let base_name = font_dict
+                .get(b"BaseFont")
+                .ok()
+                .and_then(|s| s.as_name().ok())
+                .map(|n| String::from_utf8_lossy(n).to_string())
+                .unwrap_or_default();
+
             // Try ToUnicode CMap
             if let Ok(tu) = font_dict.get(b"ToUnicode")
                 && let Ok((_, Object::Stream(stream))) = doc.dereference(tu)
@@ -163,6 +171,7 @@ fn build_font_cmaps(doc: &Document) -> BTreeMap<String, FontInfo> {
                             } else {
                                 CidEncoding::U16
                             },
+                            base_name,
                         },
                     );
                 }
@@ -543,4 +552,93 @@ fn get_page_height(doc: &Document, page_num: u32) -> f32 {
         }
     }
     842.0
+}
+
+// ── SVG font embedding ─────────────────────────────────────────────────
+
+/// Embed the COLR emoji font as a base64 data URI in the SVG `<defs>`.
+/// Scans SVG text for emoji characters, finds their font-family, and injects
+/// a `@font-face` declaration targeting that font. SVG viewers can then
+/// render emoji without system font fallback.
+pub fn embed_svg_fonts(svg: &str, _pdf_bytes: &[u8]) -> String {
+    // Determine which font-family is used for emoji by scanning SVG text
+    let emoji_font: Option<String> = find_emoji_font_family(svg);
+
+    let Some(ref emoji_family) = emoji_font else {
+        return svg.to_string();
+    };
+
+    // Read the COLR emoji font file
+    let home = std::env::var("HOME").unwrap_or_default();
+    let emoji_font_paths = [
+        std::path::PathBuf::from(format!("{home}/.cache/typepress/fonts/Noto-COLRv1.ttf")),
+        std::path::PathBuf::from("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"),
+    ];
+
+    let font_bytes = emoji_font_paths.iter().find_map(|p| std::fs::read(p).ok());
+    let Some(font_bytes) = font_bytes else {
+        return svg.to_string();
+    };
+
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&font_bytes);
+    let data_uri = format!("data:font/truetype;base64,{}", b64);
+
+    let font_face = format!(
+        "@font-face {{ font-family: \"{0}\"; src: url(\"{1}\") format(\"truetype\"); }}\n",
+        emoji_family, data_uri
+    );
+
+    // Inject after <svg ...> opening tag (skip <?xml?>)
+    let svg_tag_end = svg.find("<svg").and_then(|start| {
+        let offset = svg[start..].find('>')?;
+        Some(start + offset)
+    });
+    if let Some(end) = svg_tag_end {
+        let (head, tail) = svg.split_at(end + 1);
+        format!("{}<defs><style>{}</style></defs>{}", head, font_face, tail)
+    } else {
+        svg.to_string()
+    }
+}
+
+/// Find which SVG font-family is used for emoji text by scanning for
+/// characters in the emoji Unicode range.
+fn find_emoji_font_family(svg: &str) -> Option<String> {
+    let mut pos = 0;
+    while let Some(tag_start) = svg[pos..].find("<text") {
+        let tag_start = pos + tag_start;
+        let tag_end = svg[tag_start..].find('>').map(|o| tag_start + o)?;
+        let tag = &svg[tag_start..=tag_end];
+
+        // Extract font-family
+        let ff = tag.find("font-family=\"").and_then(|i| {
+            let start = i + 13;
+            let end = tag[start..].find('"')?;
+            Some(&tag[start..start + end])
+        });
+
+        // Extract text content
+        let content_start = tag_end + 1;
+        let content_end = svg[content_start..]
+            .find("</text>")
+            .map(|o| content_start + o)?;
+        let text = &svg[content_start..content_end];
+
+        // Check for emoji characters
+        let has_emoji = text.chars().any(|c| {
+            let cp = c as u32;
+            (0x1F300..=0x1F9FF).contains(&cp)
+                || (0x2600..=0x27BF).contains(&cp)
+                || (0x2300..=0x23FF).contains(&cp)
+                || cp >= 0x1F000
+        });
+
+        if has_emoji {
+            return ff.map(|s| s.to_string());
+        }
+
+        pos = content_end;
+    }
+    None
 }

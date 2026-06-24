@@ -1103,7 +1103,8 @@ fn render_png_from_pdf(pdf_bytes: &[u8], scale: f32) -> Result<Vec<u8>> {
 }
 
 fn render_svg_from_pdf(pdf_bytes: &[u8]) -> Result<String> {
-    svg::svg_unicode(pdf_bytes, 1)
+    let raw_svg = svg::svg_unicode(pdf_bytes, 1)?;
+    Ok(svg::embed_svg_fonts(&raw_svg, pdf_bytes))
 }
 
 /// Generate multi-page output filenames from a base path.
@@ -1131,8 +1132,9 @@ fn write_svg_multi(pdf_bytes: &[u8], output: &Path) -> Result<()> {
     let pages = svg::page_count(pdf_bytes)?;
     let paths = page_output_paths(output, pages);
     for (i, path) in paths.iter().enumerate() {
-        let svg_content = svg::svg_unicode(pdf_bytes, (i + 1) as u32)?;
-        std::fs::write(path, svg_content)?;
+        let raw_svg = svg::svg_unicode(pdf_bytes, (i + 1) as u32)?;
+        let embedded = svg::embed_svg_fonts(&raw_svg, pdf_bytes);
+        std::fs::write(path, embedded)?;
         eprintln!("SVG page {} written to {}", i + 1, path.display());
     }
     Ok(())
