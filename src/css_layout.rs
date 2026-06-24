@@ -713,6 +713,15 @@ pub fn scale_css_for_fit(html: &str, scale: f64) -> String {
     .into_owned()
 }
 
+/// Scan HTML for the widest explicit max-width or width in px.
+/// Returns the maximum px value found, or None if no explicit widths.
+pub fn max_explicit_width_px(html: &str) -> Option<f64> {
+    let re = regex::Regex::new(r#"(?:max-)?width\s*:\s*(\d+)px"#).unwrap();
+    re.captures_iter(html)
+        .filter_map(|c| c.get(1)?.as_str().parse::<f64>().ok())
+        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+}
+
 /// Count pages in a PDF byte buffer.
 pub fn count_pdf_pages(pdf: &[u8]) -> usize {
     // Count /Type /Page minus /Type /Pages

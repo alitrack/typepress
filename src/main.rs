@@ -198,6 +198,34 @@ fn parse_page_size(s: &str) -> PageSize {
     }
 }
 
+/// Get standard page dimensions in mm for the width-cap check.
+fn page_size_mm(name: &str) -> Option<(f64, f64)> {
+    match name.to_uppercase().as_str() {
+        "A0" => Some((841.0, 1189.0)),
+        "A1" => Some((594.0, 841.0)),
+        "A2" => Some((420.0, 594.0)),
+        "A3" => Some((297.0, 420.0)),
+        "A4" => Some((210.0, 297.0)),
+        "A5" => Some((148.0, 210.0)),
+        "A6" => Some((105.0, 148.0)),
+        "LETTER" => Some((215.9, 279.4)),
+        "LEGAL" => Some((215.9, 355.6)),
+        "TABLOID" => Some((279.4, 431.8)),
+        "EXECUTIVE" => Some((184.15, 266.7)),
+        s if s.contains('x') => {
+            let parts: Vec<&str> = s.split('x').collect();
+            if parts.len() >= 2 {
+                let w: f64 = parts[0].trim().parse().ok()?;
+                let h: f64 = parts[1].trim().parse().ok()?;
+                Some((w, h))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 fn parse_margin(s: &str) -> Margin {
     let values: Vec<std::result::Result<f32, _>> =
         s.split_whitespace().map(parse_length_mm).collect();
@@ -1467,6 +1495,33 @@ fn main() -> Result<()> {
                     lo = mid; // fits → try larger
                 } else {
                     hi = mid; // too much → shrink
+                }
+            }
+            // Width cap: guard against horizontal overflow that fulgur silently clips.
+            // count_pdf_pages can only detect vertical overflow (page breaks), not
+            // horizontal overflow — content extending beyond page width is clipped.
+            if let Some(html_max_w) = typepress::css_layout::max_explicit_width_px(&html) {
+                let page_dim = page_size_mm(resolved_size.as_deref().unwrap_or("A4"))
+                    .unwrap_or((210.0, 297.0));
+                let (pw, _ph) = if landscape {
+                    (page_dim.1, page_dim.0)
+                } else {
+                    page_dim
+                };
+                let margin_mm = resolved_margin
+                    .map(|m| (m.left as f64) / 72.0 * 25.4) // pt → mm
+                    .unwrap_or(20.0);
+                let content_px = (pw - 2.0 * margin_mm) * 96.0 / 25.4;
+                let safe_scale = content_px / html_max_w;
+                if lo > safe_scale {
+                    eprintln!(
+                        "  Width cap: {:.1}% → {:.1}% ({}px max-width > {}px page content)",
+                        lo * 100.0,
+                        safe_scale * 100.0,
+                        html_max_w,
+                        content_px as u32,
+                    );
+                    lo = safe_scale;
                 }
             }
             // 0.5% initial safety margin; post-validate loop below may shrink further
