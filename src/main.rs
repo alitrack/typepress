@@ -1050,57 +1050,6 @@ fn read_input(input: Option<&PathBuf>, stdin: bool) -> Result<String> {
 
 // ── Multi-Format Output ────────────────────────────────────────────────
 
-fn render_png_from_pdf(pdf_bytes: &[u8], scale: f32) -> Result<Vec<u8>> {
-    use tiny_skia::Pixmap;
-
-    let tmp = tempfile::NamedTempFile::new()?;
-    let path = tmp.path().to_path_buf();
-    std::fs::write(&path, pdf_bytes)?;
-    let result = fulgur::inspect::inspect(&path)?;
-
-    // Read actual page dimensions from PDF MediaBox (not hardcoded A4)
-    let (w_pt, h_pt) = lopdf::Document::load(&path)
-        .ok()
-        .and_then(|doc| {
-            let pages = doc.get_pages();
-            let first_page_id = pages.values().next().copied()?;
-            let dict = doc.get_dictionary(first_page_id).ok()?;
-            let media_box = dict.get(b"MediaBox").ok()?;
-            let arr = media_box.as_array().ok()?;
-            let w = arr.get(2).and_then(|o| o.as_f32().ok()).unwrap_or(595.0);
-            let h = arr.get(3).and_then(|o| o.as_f32().ok()).unwrap_or(842.0);
-            Some((w, h))
-        })
-        .unwrap_or((595.0, 842.0));
-    let w = w_pt * scale;
-    let h = h_pt * scale;
-
-    let first_page = result.text_items.iter().filter(|t| t.page == 1);
-
-    let mut pixmap = Pixmap::new(w as u32, h as u32)
-        .ok_or_else(|| anyhow::anyhow!("failed to create pixmap {w}x{h}"))?;
-    pixmap.fill(tiny_skia::Color::WHITE);
-
-    // Simple approach: draw text items as colored rectangles
-    // (Full text rendering would need font loading)
-    let paint = tiny_skia::Paint {
-        shader: tiny_skia::Shader::SolidColor(tiny_skia::Color::from_rgba8(0, 0, 0, 255)),
-        ..Default::default()
-    };
-    for item in first_page {
-        let rx = item.x * scale;
-        let ry = item.y * scale;
-        let rw = item.width.max(4.0) * scale;
-        let rh = item.height * scale;
-        let rect = tiny_skia::Rect::from_xywh(rx, ry, rw, rh)
-            .unwrap_or(tiny_skia::Rect::from_xywh(0.0, 0.0, 1.0, 1.0).unwrap());
-        pixmap.fill_rect(rect, &paint, tiny_skia::Transform::default(), None);
-    }
-
-    let png_data = pixmap.encode_png()?;
-    Ok(png_data)
-}
-
 // ── Main ───────────────────────────────────────────────────────────────
 
 fn main() -> Result<()> {
@@ -1164,36 +1113,11 @@ fn main() -> Result<()> {
         let pdf_bytes = std::fs::read(input_file.as_ref().unwrap())?;
         let to_stdout = cli.output.as_ref().is_some_and(|o| o.as_os_str() == "-");
         if to_stdout {
-            match cli.format.as_str() {
-                "svg" => eprintln!(
-                    "SVG output from PDF input is not supported. Use `--format pdf` instead."
-                ),
-                "png" => {
-                    use std::io::Write;
-                    std::io::stdout().write_all(&render_png_from_pdf(&pdf_bytes, cli.scale)?)?;
-                }
-                _ => {
-                    use std::io::Write;
-                    std::io::stdout().write_all(&pdf_bytes)?;
-                }
-            }
+            use std::io::Write;
+            std::io::stdout().write_all(&pdf_bytes)?;
         } else if let Some(ref output) = cli.output {
-            match cli.format.as_str() {
-                "svg" => eprintln!(
-                    "SVG output from PDF input is not supported. Use `--format pdf` instead."
-                ),
-                "png" => {
-                    std::fs::write(output, render_png_from_pdf(&pdf_bytes, cli.scale)?)?;
-                    eprintln!(
-                        "PNG written to {} (note: rasterized as text bounding boxes, not rendered text)",
-                        output.display()
-                    );
-                }
-                _ => {
-                    std::fs::write(output, &pdf_bytes)?;
-                    eprintln!("PDF written to {}", output.display());
-                }
-            }
+            std::fs::write(output, &pdf_bytes)?;
+            eprintln!("PDF written to {}", output.display());
         }
         return Ok(());
     }
@@ -1537,61 +1461,27 @@ fn main() -> Result<()> {
     // 5. Route output by format. YAML config triggers multi-format.
     let to_stdout = cli.output.as_ref().is_some_and(|o| o.as_os_str() == "-");
 
-    // Config-driven multi-format output (from YAML output section)
+    // Config-driven output (from YAML output section)
     if let Some(oc) = cfg.as_ref().and_then(|c| c.output.as_ref()) {
         if let Some(ref path) = oc.pdf {
             std::fs::write(path, &pdf)?;
             eprintln!("PDF written to {}", path.display());
         }
-        if let Some(ref path) = oc.svg {
-            eprintln!("SVG output not yet supported. Skipping {}.", path.display());
-        }
-        if let Some(ref path) = oc.png {
-            std::fs::write(path, render_png_from_pdf(&pdf, cli.scale)?)?;
-            eprintln!(
-                "PNG written to {} (note: rasterized as text bounding boxes, not rendered text)",
-                path.display()
-            );
-        }
     }
 
-    // CLI-driven output (--format + -o). Skip if YAML config already handles this format.
+    // CLI-driven output
     if to_stdout {
-        match cli.format.as_str() {
-            "svg" => eprintln!("SVG output not yet supported. Use `--format pdf` instead."),
-            "png" => {
-                use std::io::Write;
-                std::io::stdout().write_all(&render_png_from_pdf(&pdf, cli.scale)?)?;
-            }
-            _ => {
-                use std::io::Write;
-                std::io::stdout().write_all(&pdf)?;
-            }
-        }
+        use std::io::Write;
+        std::io::stdout().write_all(&pdf)?;
     } else if let Some(ref output) = cli.output {
-        // Check if YAML already handles this specific format
-        let yaml_has_format = cfg
+        // Check if YAML already handles PDF
+        let yaml_has_pdf = cfg
             .as_ref()
             .and_then(|c| c.output.as_ref())
-            .is_some_and(|oc| match cli.format.as_str() {
-                "png" => oc.png.is_some(),
-                _ => oc.pdf.is_some(),
-            });
-        if !yaml_has_format {
-            match cli.format.as_str() {
-                "svg" => eprintln!("SVG output not yet supported. Use `--format pdf` instead."),
-                "png" => {
-                    std::fs::write(output, render_png_from_pdf(&pdf, cli.scale)?)?;
-                    eprintln!(
-                        "PNG written to {} (note: rasterized as text bounding boxes, not rendered text)",
-                        output.display()
-                    );
-                }
-                _ => {
-                    std::fs::write(output, &pdf)?;
-                    eprintln!("PDF written to {}", output.display());
-                }
-            }
+            .is_some_and(|oc| oc.pdf.is_some());
+        if !yaml_has_pdf {
+            std::fs::write(output, &pdf)?;
+            eprintln!("PDF written to {}", output.display());
         }
     }
 

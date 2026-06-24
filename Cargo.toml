@@ -27,8 +27,6 @@ tempfile = "3"
 # Config
 serde = { version = "1", features = ["derive"] }
 noyalib = "0.0"
-# PDF parsing for SVG Unicode text extraction (ToUnicode CMap)
-lopdf = "0.40"
 # HTTP for @font-face web font downloading
 reqwest = { version = "0.12", features = ["blocking"] }
 # Code syntax highlighting

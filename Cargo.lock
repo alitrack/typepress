@@ -3942,7 +3942,6 @@ dependencies = [
  "fulgur",
  "katex-rs",
  "log",
- "lopdf",
  "mermaid-render",
  "noyalib",
  "predicates",
