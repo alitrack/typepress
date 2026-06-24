@@ -29,14 +29,28 @@ struct FontInfo {
 }
 
 /// Parse a ToUnicode CMap stream and return a CID→char mapping.
+/// Handles multiple beginbfchar/endbfchar and beginbfrange/endbfrange
+/// blocks (PDF limits each block to 100 entries, so subset CJK fonts with
+/// >100 glyphs split across multiple blocks).
 fn parse_tounicode_cmap(stream_data: &[u8]) -> CidMap {
     let s = String::from_utf8_lossy(stream_data);
     let mut map = CidMap::new();
 
-    // Parse bfchar: <CID> <Unicode>
-    // E.g. "beginbfchar\n<0001> <0041>\n<0002> <0042>\nendbfchar"
-    if let Some(bfchar) = extract_section(&s, "beginbfchar", "endbfchar") {
-        for line in bfchar.lines() {
+    // Parse ALL bfchar blocks (there may be multiple)
+    let mut pos = 0;
+    loop {
+        let start = match s[pos..].find("beginbfchar") {
+            Some(i) => pos + i + "beginbfchar".len(),
+            None => break,
+        };
+        let end_pos = match s[start..].find("endbfchar") {
+            Some(i) => i,
+            None => break,
+        };
+        let section = &s[start..start + end_pos];
+        pos = start + end_pos + "endbfchar".len();
+
+        for line in section.lines() {
             let line = line.trim();
             if line.is_empty() {
                 continue;
@@ -52,11 +66,21 @@ fn parse_tounicode_cmap(stream_data: &[u8]) -> CidMap {
         }
     }
 
-    // Parse bfrange: <startCID> <endCID> <startUnicode>
-    // E.g. "beginbfrange\n<0003> <0005> <0043>\nendbfrange"
-    // This maps CID 0003→0043, 0004→0044, 0005→0045
-    if let Some(bfrange) = extract_section(&s, "beginbfrange", "endbfrange") {
-        for line in bfrange.lines() {
+    // Parse ALL bfrange blocks (there may be multiple)
+    pos = 0;
+    loop {
+        let start = match s[pos..].find("beginbfrange") {
+            Some(i) => pos + i + "beginbfrange".len(),
+            None => break,
+        };
+        let end_pos = match s[start..].find("endbfrange") {
+            Some(i) => i,
+            None => break,
+        };
+        let section = &s[start..start + end_pos];
+        pos = start + end_pos + "endbfrange".len();
+
+        for line in section.lines() {
             let line = line.trim();
             if line.is_empty() {
                 continue;
@@ -134,9 +158,6 @@ fn build_font_cmaps(doc: &Document) -> BTreeMap<String, FontInfo> {
 
         for (name, font_ref) in &fonts {
             let name_str = String::from_utf8_lossy(name).into_owned();
-            if font_info.contains_key(&name_str) {
-                continue;
-            }
             let font_dict = match doc.dereference(font_ref) {
                 Ok((_, Object::Dictionary(d))) => d,
                 _ => continue,
@@ -160,20 +181,30 @@ fn build_font_cmaps(doc: &Document) -> BTreeMap<String, FontInfo> {
             if let Ok(tu) = font_dict.get(b"ToUnicode")
                 && let Ok((_, Object::Stream(stream))) = doc.dereference(tu)
             {
-                let cmap = parse_tounicode_cmap(&stream.content);
-                if !cmap.is_empty() {
-                    font_info.insert(
-                        name_str,
-                        FontInfo {
-                            cmap,
-                            encoding: if is_type3 {
-                                CidEncoding::SingleByte
-                            } else {
-                                CidEncoding::U16
+                let new_cmap = parse_tounicode_cmap(&stream.content);
+                if !new_cmap.is_empty() {
+                    if let Some(existing) = font_info.get_mut(&name_str) {
+                        // Merge: extend existing CMap with entries from this page.
+                        // krilla may create per-page font subsets with different CID
+                        // assignments for the same font resource name; merging all
+                        // pages' CMaps ensures every page's text decodes correctly.
+                        for (cid, ch) in new_cmap {
+                            existing.cmap.entry(cid).or_insert(ch);
+                        }
+                    } else {
+                        font_info.insert(
+                            name_str,
+                            FontInfo {
+                                cmap: new_cmap,
+                                encoding: if is_type3 {
+                                    CidEncoding::SingleByte
+                                } else {
+                                    CidEncoding::U16
+                                },
+                                base_name,
                             },
-                            base_name,
-                        },
-                    );
+                        );
+                    }
                 }
             }
         }
@@ -277,7 +308,8 @@ fn decode_with_cmap(bytes: &[u8], info: &FontInfo) -> String {
 
     // Auto-detect interleaved format: if all odd-indexed pairs have
     // the same value (consistent advance), skip them as adjustments.
-    let interleaved = pairs.len() >= 4 && pairs.iter().skip(1).step_by(2).all(|&v| v == pairs[1]);
+    // DEBUG: temporarily disable interleaved detection
+    let interleaved = false; // was: pairs.len() >= 4 && pairs.iter().skip(1).step_by(2).all(|&v| v == pairs[1]);
 
     let mut result = String::new();
     for (i, &cid) in pairs.iter().enumerate() {
@@ -499,11 +531,13 @@ pub fn svg_unicode(pdf_bytes: &[u8], page: u32) -> Result<String> {
             .replace('&', "&amp;")
             .replace('<', "&lt;")
             .replace('>', "&gt;");
+        // PDF origin is bottom-left; SVG origin is top-left. Flip Y.
+        // Baseline is already accounted for by the PDF text matrix,
+        // so no extra offset is needed beyond the coordinate flip.
         svg.push_str(&format!(
-            r#"<text x="{x}" y="{y}" font-family="{font}" font-size="{size}" fill="black">{text}</text>
-"#,
+            r#"<text x="{x}" y="{y}" font-family="{font}" font-size="{size}" fill="black">{text}</text>\n"#,
             x = item.x,
-            y = item.y + item.font_size * 0.8,
+            y = h - item.y,
             font = item.font,
             size = item.font_size,
             text = escaped,
