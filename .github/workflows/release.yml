@@ -118,6 +118,9 @@ jobs:
     name: Publish to PyPI
     needs: github-release
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # required for PyPI OIDC
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
