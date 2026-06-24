@@ -931,6 +931,24 @@ fn math_font_face_css(font_path: &Path) -> String {
     )
 }
 
+/// Detect system emoji font and return its path.
+/// Noto Serif CJK doesn't cover all emoji glyphs (missing 👦👧👩🛠 etc).
+fn detect_emoji_font() -> Option<PathBuf> {
+    for path in &[
+        "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+        "/usr/share/fonts/noto/NotoColorEmoji.ttf",
+        "/System/Library/Fonts/Apple Color Emoji.ttc",
+        "C:\\Windows\\Fonts\\seguiemj.ttf",
+    ] {
+        let p = std::path::Path::new(path);
+        if p.exists() {
+            eprintln!("Emoji font: {}", p.display());
+            return Some(p.to_path_buf());
+        }
+    }
+    None
+}
+
 fn auto_detect_katex_fonts() -> Option<PathBuf> {
     // 1. Common npm global locations (no subprocess, pure path check)
     for npm_root in katex_npm_roots() {
@@ -1349,9 +1367,15 @@ fn main() -> Result<()> {
     }
 
     // 3. Build asset bundle — start with @font-face font resolution
-    let mut font_face_paths: Vec<PathBuf> = Vec::new();
-
     // Parse @font-face from inline styles in the HTML
+
+    let mut font_face_paths: Vec<PathBuf> = Vec::new();
+    // Emoji font fallback: register system emoji font for glyphs missing
+    // from Noto Serif CJK (👦👧👩🛠 etc). Note: Krilla does not support
+    // color bitmap fonts, so color emoji glyphs render as monochrome outlines.
+    if let Some(emoji_path) = detect_emoji_font() {
+        font_face_paths.push(emoji_path);
+    }
     for ff in fonts::extract_font_faces_from_html(&html) {
         match fonts::resolve_font_path(&ff.src_url, base_path.as_deref()) {
             Ok(path) => font_face_paths.push(path),
