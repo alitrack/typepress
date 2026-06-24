@@ -172,9 +172,17 @@ impl Cli {
 
 fn parse_page_size(s: &str) -> PageSize {
     match s.to_uppercase().as_str() {
-        "A4" => PageSize::A4,
+        "A0" => PageSize::custom(841.0, 1189.0),
+        "A1" => PageSize::custom(594.0, 841.0),
+        "A2" => PageSize::custom(420.0, 594.0),
         "A3" => PageSize::A3,
+        "A4" => PageSize::A4,
+        "A5" => PageSize::custom(148.0, 210.0),
+        "A6" => PageSize::custom(105.0, 148.0),
         "LETTER" => PageSize::LETTER,
+        "LEGAL" => PageSize::custom(215.9, 355.6),
+        "TABLOID" => PageSize::custom(279.4, 431.8),
+        "EXECUTIVE" => PageSize::custom(184.15, 266.7),
         _ => {
             // Try custom WxH in mm: "594x420"
             if let Some((w, h)) = s.split_once('x')
