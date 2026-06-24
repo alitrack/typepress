@@ -4,144 +4,172 @@
 Usage:
     python3 smart-zoom.py input.html -o output.pdf [--size A3|A4] [--min-fill 80]
 
-The script renders the HTML once at zoom 1.0 to a large canvas, measures content
-dimensions, then re-renders with calculated zoom to maximize page fill.
+Measures content by rendering at zoom=1.0 to A2, calculates optimal zoom,
+then outputs a single-page PDF. Works around TypePress's hard page breaks
+by merging pages with pypdf (BSD-3-Clause, MIT-compatible).
 """
 
 import argparse
 import subprocess
 import sys
-import fitz  # PyMuPDF
+import tempfile
+from pathlib import Path
+from pypdf import PdfReader, PdfWriter, Transformation
 
+# BSD-3-Clause — MIT compatible
 
 PAGE_SIZES = {
-    "A3": (841.89, 1190.55),      # pt
+    "A3": (841.89, 1190.55),
     "A4": (595.28, 841.89),
     "A3-L": (1190.55, 841.89),
     "A4-L": (841.89, 595.28),
 }
 
 
-def measure_content(input_html: str) -> tuple[float, float]:
-    """Render to large canvas and measure content bounding box. Returns (w, h) in pt."""
+def run_typepress(input_html: str, output: str, size: str, zoom: float,
+                  cwd: str = "/mnt/d/wsl2/typepress") -> bool:
+    """Run TypePress and return True on success."""
     result = subprocess.run(
-        ["cargo", "run", "--", input_html,
-         "-o", "/tmp/typepress-measure.pdf",
-         "-s", "A2", "--zoom", "1.0"],
-        cwd="/mnt/d/wsl2/typepress",
-        capture_output=True, text=True, timeout=120,
+        ["cargo", "run", "--", input_html, "-o", output, "-s", size,
+         "--zoom", f"{zoom:.4f}"],
+        cwd=cwd, capture_output=True, text=True, timeout=120,
     )
-    if result.returncode != 0:
-        print(f"Measure render failed: {result.stderr}")
+    return result.returncode == 0
+
+
+def page_count(pdf_path: str) -> int:
+    """Count pages in a PDF using pypdf."""
+    reader = PdfReader(pdf_path)
+    n = len(reader.pages)
+    reader.stream.close()
+    return n
+
+
+def measure_content(input_html: str) -> tuple[float, float]:
+    """Render to large canvas and measure content dimensions.
+
+    Renders at zoom=1.0 to A2 and aggregates bounding boxes across all pages.
+    Returns (width, height) in pt.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+        measure_pdf = f.name
+
+    if not run_typepress(input_html, measure_pdf, "A2", 1.0):
+        Path(measure_pdf).unlink(missing_ok=True)
+        print("Measure render failed")
         sys.exit(1)
 
-    doc = fitz.open("/tmp/typepress-measure.pdf")
-    all_xs, all_ys = [], []
-    for page in doc:
-        blocks = page.get_text("blocks")
-        for b in blocks:
-            all_xs.extend([b[0], b[2]])
-            all_ys.extend([b[1], b[3]])
-    doc.close()
+    reader = PdfReader(measure_pdf)
+    all_w, all_h = [], []
+    for page in reader.pages:
+        w = float(page.mediabox.width)
+        h = float(page.mediabox.height)
+        all_w.append(w)
+        all_h.append(h)
 
-    if not all_xs:
-        print("Error: no content blocks found")
-        sys.exit(1)
+    n_pages = len(reader.pages)
+    reader.stream.close()
+    Path(measure_pdf).unlink()
 
-    content_w = max(all_xs) - min(all_xs)
-    content_h = max(all_ys) - min(all_ys)
+    # Total content height = sum of all page heights
+    # Content width = max page width
+    content_w = max(all_w) if all_w else 595.0
+    content_h = sum(all_h) if all_h else 842.0
+
     return content_w, content_h
 
 
 def calculate_zoom(content_w: float, content_h: float,
                    page_w: float, page_h: float,
-                   margin: float = 30) -> tuple[float, float, float]:
-    """Calculate zoom that maximizes fill while keeping 1 page."""
+                   margin: float = 30) -> float:
+    """Calculate zoom that maximizes content on one page."""
     avail_w = page_w - 2 * margin
     avail_h = page_h - 2 * margin
     zw = avail_w / content_w
     zh = avail_h / content_h
-    zoom = min(zw, zh)  # Fit by the tighter dimension
-    fill_w = (content_w * zoom + 2 * margin) / page_w * 100
-    fill_h = (content_h * zoom + 2 * margin) / page_h * 100
-    return zoom, fill_w, fill_h
+    return min(zw, zh)
+
+
+def render_and_merge(input_html: str, output: str, size: str,
+                     zoom: float, cwd: str) -> bool:
+    """Render with TypePress and merge all pages into one tall page."""
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+        tmp_pdf = f.name
+
+    if not run_typepress(input_html, tmp_pdf, size, zoom, cwd):
+        Path(tmp_pdf).unlink(missing_ok=True)
+        return False
+
+    reader = PdfReader(tmp_pdf)
+    n_pages = len(reader.pages)
+
+    if n_pages == 1:
+        # Already one page — just copy
+        import shutil
+        shutil.copy(tmp_pdf, output)
+    else:
+        # Merge pages into one tall page
+        page_w = float(reader.pages[0].mediabox.width)
+        page_h = float(reader.pages[0].mediabox.height)
+        total_h = page_h * n_pages
+
+        writer = PdfWriter()
+        combined = writer.add_blank_page(width=page_w, height=total_h)
+
+        for i in range(n_pages):
+            offset_y = -(page_h * i)
+            combined.merge_transformed_page(
+                reader.pages[i],
+                Transformation().translate(ty=offset_y)
+            )
+
+        writer.write(output)
+
+    reader.stream.close()
+    Path(tmp_pdf).unlink()
+    return True
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Smart zoom for TypePress")
+    parser = argparse.ArgumentParser(
+        description="Smart zoom for TypePress — single-page output")
     parser.add_argument("input", help="Input HTML file")
     parser.add_argument("-o", "--output", required=True, help="Output PDF path")
-    parser.add_argument("--size", default="A3", choices=["A3", "A4", "A3-L", "A4-L"])
+    parser.add_argument("--size", default="A3",
+                        choices=["A3", "A4", "A3-L", "A4-L"])
     parser.add_argument("--min-fill", type=float, default=75,
-                        help="Minimum fill percentage (default: 75)")
+                        help="Minimum fill % for width (default: 75)")
     parser.add_argument("--margin", type=float, default=30,
                         help="Page margin in pt (default: 30)")
-    parser.add_argument("--typepress", default="cargo run --release --",
-                        help="TypePress command prefix")
+    parser.add_argument("--typepress-dir", default="/mnt/d/wsl2/typepress",
+                        help="TypePress project directory")
     args = parser.parse_args()
 
     pw, ph = PAGE_SIZES[args.size]
 
-    # Step 1: measure
-    print(f"Measuring content dimensions for {args.input}...")
+    # Step 1: measure content at zoom 1.0
+    print(f"Measuring: {args.input}...")
     content_w, content_h = measure_content(args.input)
-    print(f"  Content: {content_w:.0f} x {content_h:.0f} pt  ({content_w/72:.1f}\" x {content_h/72:.1f}\")")
+    print(f"  Content: {content_w:.0f} x {content_h:.0f} pt  "
+          f"({content_w/72:.1f}\" x {content_h/72:.1f}\")")
 
-    # Step 2: calculate
-    zoom, fw, fh = calculate_zoom(content_w, content_h, pw, ph, args.margin)
+    # Step 2: calculate zoom for best width fill
+    zoom = calculate_zoom(content_w, content_h, pw, ph, args.margin)
+    fill_w = (content_w * zoom + 2 * args.margin) / pw * 100
     print(f"  Target:  {args.size} ({pw:.0f}x{ph:.0f} pt)")
     print(f"  Zoom:    {zoom:.3f}")
-    print(f"  Fill:    {fw:.0f}% width, {fh:.0f}% height")
+    print(f"  Fill:    {fill_w:.0f}% width")
 
-    if fw < args.min_fill and fh < args.min_fill:
-        # Try page-size-up if undersized
-        for alt, (apw, aph) in PAGE_SIZES.items():
-            if alt == args.size:
-                continue
-            az, afw, afh = calculate_zoom(content_w, content_h, apw, aph, args.margin)
-            if afw >= args.min_fill and afh >= args.min_fill:
-                print(f"  → Switching to {alt}: zoom={az:.3f}, fill={afw:.0f}%W {afh:.0f}%H")
-                pw, ph = apw, aph
-                zoom, fw, fh = az, afw, afh
-                break
-        else:
-            # None ideal — use best of available
-            best = max(
-                [(alt, *calculate_zoom(content_w, content_h, apw, aph, args.margin))
-                 for alt, (apw, aph) in PAGE_SIZES.items() if 'L' not in alt],
-                key=lambda x: min(x[2], x[3])
-            )
-            print(f"  → No ideal size, using {best[0]}: zoom={best[1]:.3f}, fill={best[2]:.0f}%W {best[3]:.0f}%H")
-
-    # Step 3: render
-    size_flag = args.size.replace("-L", "")
-    landscape = "-l" if args.size.endswith("-L") else ""
-    cmd = f"cargo run -- {args.input} -o {args.output} -s {size_flag} --zoom {zoom:.4f} {landscape}"
-    if landscape:
-        cmd = cmd.replace(f"-s {size_flag}", f"-s {size_flag} -l")
-    print(f"\nRendering: {cmd}")
-    result = subprocess.run(cmd, shell=True, cwd="/mnt/d/wsl2/typepress",
-                            capture_output=True, text=True, timeout=120)
-    if result.returncode != 0:
-        print(f"Render failed: {result.stderr}")
+    # Step 3: render + merge
+    print(f"\nRendering...")
+    if render_and_merge(args.input, args.output, args.size, zoom,
+                        args.typepress_dir):
+        pc = page_count(args.output)
+        print(f"  Result:  {pc} page(s)")
+        print(f"Done: {args.output}")
+    else:
+        print("Render failed")
         sys.exit(1)
-
-    # Step 4: verify
-    doc = fitz.open(args.output)
-    pages = len(doc)
-    # Verify actual fill
-    blocks = doc[0].get_text("blocks")
-    if blocks:
-        xs = [b[0] for b in blocks] + [b[2] for b in blocks]
-        ys = [b[1] for b in blocks] + [b[3] for b in blocks]
-        actual_w = max(xs) - min(xs)
-        actual_h = max(ys) - min(ys)
-        actual_fw = 100 * actual_w / doc[0].rect.width
-        actual_fh = 100 * actual_h / doc[0].rect.height
-        print(f"  Result: {pages} page(s), actual fill {actual_fw:.0f}%W {actual_fh:.0f}%H")
-    doc.close()
-
-    print(f"Done: {args.output}")
 
 
 if __name__ == "__main__":
