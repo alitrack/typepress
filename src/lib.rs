@@ -3,6 +3,7 @@
 pub mod config;
 pub mod css;
 pub mod css_layout;
+pub mod emoji;
 pub mod fonts;
 pub mod highlight;
 pub mod network;

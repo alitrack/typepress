@@ -1319,6 +1319,15 @@ fn main() -> Result<()> {
         // 0a. CSS Layout: using native blitz-html 0.3 (flex/grid → taffy natively)
         // (old Grid→Table preprocessing removed — no longer needed)
 
+        // Emoji → PNG replacement (before network resources so file:// img tags work)
+        {
+            let (new_html, n) = typepress::emoji::replace_emoji_with_images(&html);
+            html = new_html;
+            if n > 0 {
+                eprintln!("Replaced {n} emoji(s) with images");
+            }
+        }
+
         // 0b. Network resources: download remote CSS <link> + <img>
         match typepress::network::inject_remote_css(&mut html) {
             Ok(n) if n > 0 => eprintln!("Downloaded {n} remote CSS file(s)"),
