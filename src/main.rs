@@ -1319,15 +1319,6 @@ fn main() -> Result<()> {
         // 0a. CSS Layout: using native blitz-html 0.3 (flex/grid → taffy natively)
         // (old Grid→Table preprocessing removed — no longer needed)
 
-        // Emoji → PNG replacement (before network resources so file:// img tags work)
-        {
-            let (new_html, n) = typepress::emoji::replace_emoji_with_images(&html);
-            html = new_html;
-            if n > 0 {
-                eprintln!("Replaced {n} emoji(s) with images");
-            }
-        }
-
         // 0b. Network resources: download remote CSS <link> + <img>
         match typepress::network::inject_remote_css(&mut html) {
             Ok(n) if n > 0 => eprintln!("Downloaded {n} remote CSS file(s)"),
@@ -1384,6 +1375,17 @@ fn main() -> Result<()> {
     // color bitmap fonts, so color emoji glyphs render as monochrome outlines.
     if let Some(emoji_path) = detect_emoji_font() {
         font_face_paths.push(emoji_path);
+    }
+    // COLRv1 emoji font: auto-download for native color emoji rendering
+    // (krilla supports COLR via Type3 PDF font embedding since v0.7;
+    //  CBDT bitmap fonts are NOT supported — we use the COLRv1 version)
+    #[allow(clippy::collapsible_if)]
+    if typepress::emoji::has_emoji(&html) {
+        if let Some(colr_path) = typepress::emoji::ensure_colr_emoji_font() {
+            if !font_face_paths.iter().any(|p| p == &colr_path) {
+                font_face_paths.push(colr_path);
+            }
+        }
     }
     for ff in fonts::extract_font_faces_from_html(&html) {
         match fonts::resolve_font_path(&ff.src_url, base_path.as_deref()) {
