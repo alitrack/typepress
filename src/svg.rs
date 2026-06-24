@@ -142,10 +142,19 @@ fn hex_to_char(s: &str) -> Option<char> {
 
 /// Build a mapping from font name → (CMap, encoding) by parsing all
 /// ToUnicode CMaps and detecting font subtypes (Type3 = single-byte CID).
-fn build_font_cmaps(doc: &Document) -> BTreeMap<String, FontInfo> {
-    let mut font_info: BTreeMap<String, FontInfo> = BTreeMap::new();
+/// Build per-page CMap tables. Multi-page PDFs may reuse font resource
+/// names (f0, f1, ...) for completely different font subsets on different
+/// pages. Keying by (page, font_name) prevents cross-page CID collisions.
+fn build_font_cmaps(doc: &Document) -> Vec<BTreeMap<String, FontInfo>> {
+    let page_count = doc.get_pages().len();
+    let mut per_page: Vec<BTreeMap<String, FontInfo>> =
+        (0..page_count).map(|_| BTreeMap::new()).collect();
 
     for (&page_num, &page_id) in &doc.get_pages() {
+        let page_idx = (page_num as usize).saturating_sub(1);
+        if page_idx >= per_page.len() {
+            continue;
+        }
         let resources = resolve_page_resources(doc, page_id);
         let fonts = match resources
             .as_ref()
@@ -177,41 +186,30 @@ fn build_font_cmaps(doc: &Document) -> BTreeMap<String, FontInfo> {
                 .map(|n| String::from_utf8_lossy(n).to_string())
                 .unwrap_or_default();
 
-            // Try ToUnicode CMap
+            // Parse ToUnicode CMap
             if let Ok(tu) = font_dict.get(b"ToUnicode")
                 && let Ok((_, Object::Stream(stream))) = doc.dereference(tu)
             {
-                let new_cmap = parse_tounicode_cmap(&stream.content);
-                if !new_cmap.is_empty() {
-                    if let Some(existing) = font_info.get_mut(&name_str) {
-                        // Merge: extend existing CMap with entries from this page.
-                        // krilla may create per-page font subsets with different CID
-                        // assignments for the same font resource name; merging all
-                        // pages' CMaps ensures every page's text decodes correctly.
-                        for (cid, ch) in new_cmap {
-                            existing.cmap.entry(cid).or_insert(ch);
-                        }
-                    } else {
-                        font_info.insert(
-                            name_str,
-                            FontInfo {
-                                cmap: new_cmap,
-                                encoding: if is_type3 {
-                                    CidEncoding::SingleByte
-                                } else {
-                                    CidEncoding::U16
-                                },
-                                base_name,
+                let cmap = parse_tounicode_cmap(&stream.content);
+                if !cmap.is_empty() {
+                    per_page[page_idx].insert(
+                        name_str,
+                        FontInfo {
+                            cmap,
+                            encoding: if is_type3 {
+                                CidEncoding::SingleByte
+                            } else {
+                                CidEncoding::U16
                             },
-                        );
-                    }
+                            base_name,
+                        },
+                    );
                 }
             }
         }
-        let _ = page_num; // suppress unused warning
     }
 
-    font_info
+    per_page
 }
 
 fn resolve_page_resources(doc: &Document, page_id: lopdf::ObjectId) -> Option<lopdf::Dictionary> {
@@ -308,8 +306,7 @@ fn decode_with_cmap(bytes: &[u8], info: &FontInfo) -> String {
 
     // Auto-detect interleaved format: if all odd-indexed pairs have
     // the same value (consistent advance), skip them as adjustments.
-    // DEBUG: temporarily disable interleaved detection
-    let interleaved = false; // was: pairs.len() >= 4 && pairs.iter().skip(1).step_by(2).all(|&v| v == pairs[1]);
+    let interleaved = pairs.len() >= 4 && pairs.iter().skip(1).step_by(2).all(|&v| v == pairs[1]);
 
     let mut result = String::new();
     for (i, &cid) in pairs.iter().enumerate() {
@@ -330,10 +327,12 @@ fn estimate_width(text: &str, font_size: f32) -> f32 {
 
 pub fn extract_unicode_text(doc: &Document) -> Result<Vec<UnicodeTextItem>> {
     use lopdf::content::{Content, Operation};
-    let font_info = build_font_cmaps(doc);
+    let per_page_fonts = build_font_cmaps(doc);
     let mut items = Vec::new();
 
     for (&page_num, &page_id) in &doc.get_pages() {
+        let page_idx = (page_num as usize).saturating_sub(1);
+        let page_fonts = per_page_fonts.get(page_idx);
         let content_bytes = match doc.get_page_content(page_id) {
             Ok(b) => b,
             Err(_) => continue,
@@ -441,7 +440,7 @@ pub fn extract_unicode_text(doc: &Document) -> Result<Vec<UnicodeTextItem>> {
                     if let Some(text_obj) = operands.first()
                         && let Ok(bytes) = text_obj.as_str()
                     {
-                        let cmap = font_info.get(&font_name);
+                        let cmap = page_fonts.and_then(|pf| pf.get(&font_name));
                         let text = if let Some(c) = cmap {
                             decode_with_cmap(bytes, c)
                         } else {
@@ -467,7 +466,7 @@ pub fn extract_unicode_text(doc: &Document) -> Result<Vec<UnicodeTextItem>> {
                     if let Some(array_obj) = operands.first()
                         && let Ok(array) = array_obj.as_array()
                     {
-                        let cmap = font_info.get(&font_name);
+                        let cmap = page_fonts.and_then(|pf| pf.get(&font_name));
                         let mut combined = String::new();
                         for elem in array {
                             if let Ok(bytes) = elem.as_str() {
