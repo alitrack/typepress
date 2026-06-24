@@ -25,7 +25,6 @@ enum CidEncoding {
 struct FontInfo {
     cmap: CidMap,
     encoding: CidEncoding,
-    base_name: String,
 }
 
 /// Parse a ToUnicode CMap stream and return a CID→char mapping.
@@ -38,14 +37,10 @@ fn parse_tounicode_cmap(stream_data: &[u8]) -> CidMap {
 
     // Parse ALL bfchar blocks (there may be multiple)
     let mut pos = 0;
-    loop {
-        let start = match s[pos..].find("beginbfchar") {
-            Some(i) => pos + i + "beginbfchar".len(),
-            None => break,
-        };
-        let end_pos = match s[start..].find("endbfchar") {
-            Some(i) => i,
-            None => break,
+    while let Some(i) = s[pos..].find("beginbfchar") {
+        let start = pos + i + "beginbfchar".len();
+        let Some(end_pos) = s[start..].find("endbfchar") else {
+            break;
         };
         let section = &s[start..start + end_pos];
         pos = start + end_pos + "endbfchar".len();
@@ -68,14 +63,10 @@ fn parse_tounicode_cmap(stream_data: &[u8]) -> CidMap {
 
     // Parse ALL bfrange blocks (there may be multiple)
     pos = 0;
-    loop {
-        let start = match s[pos..].find("beginbfrange") {
-            Some(i) => pos + i + "beginbfrange".len(),
-            None => break,
-        };
-        let end_pos = match s[start..].find("endbfrange") {
-            Some(i) => i,
-            None => break,
+    while let Some(i) = s[pos..].find("beginbfrange") {
+        let start = pos + i + "beginbfrange".len();
+        let Some(end_pos) = s[start..].find("endbfrange") else {
+            break;
         };
         let section = &s[start..start + end_pos];
         pos = start + end_pos + "endbfrange".len();
@@ -102,12 +93,6 @@ fn parse_tounicode_cmap(stream_data: &[u8]) -> CidMap {
     }
 
     map
-}
-
-fn extract_section<'a>(text: &'a str, begin: &str, end: &str) -> Option<&'a str> {
-    let start = text.find(begin)? + begin.len();
-    let end_pos = text[start..].find(end)?;
-    Some(&text[start..start + end_pos])
 }
 
 fn hex_to_u16(s: &str) -> Option<u16> {
@@ -179,13 +164,6 @@ fn build_font_cmaps(doc: &Document) -> Vec<BTreeMap<String, FontInfo>> {
                 .and_then(|s| s.as_name().ok())
                 .is_some_and(|n| n == b"Type3");
 
-            let base_name = font_dict
-                .get(b"BaseFont")
-                .ok()
-                .and_then(|s| s.as_name().ok())
-                .map(|n| String::from_utf8_lossy(n).to_string())
-                .unwrap_or_default();
-
             // Parse ToUnicode CMap
             if let Ok(tu) = font_dict.get(b"ToUnicode")
                 && let Ok((_, Object::Stream(stream))) = doc.dereference(tu)
@@ -201,7 +179,6 @@ fn build_font_cmaps(doc: &Document) -> Vec<BTreeMap<String, FontInfo>> {
                             } else {
                                 CidEncoding::U16
                             },
-                            base_name,
                         },
                     );
                 }
