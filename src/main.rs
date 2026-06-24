@@ -1520,14 +1520,11 @@ fn main() -> Result<()> {
     if let Some(m) = resolved_margin {
         builder = builder.margin(m);
     }
-    // --zoom: scale CSS by wrapping content with transform
+    // --zoom: scale all CSS px values so layout engine sees reduced content height.
+    // Uses the same approach as --fit (CSS px scaling) instead of CSS transform,
+    // because transform: scale() is purely visual — Taffy doesn't see it for pagination.
     if (cli.zoom - 1.0).abs() > f32::EPSILON {
-        html = format!(
-            "<div style=\"transform:scale({});transform-origin:top left;width:{}%;\">{}</div>",
-            cli.zoom,
-            (100.0 / cli.zoom) as u32,
-            html
-        );
+        html = typepress::css_layout::scale_css_for_fit(&html, cli.zoom as f64);
     }
     // --no-outline: invert bookmarks default
     let bookmarks = if cli.no_outline { false } else { cli.bookmarks };
