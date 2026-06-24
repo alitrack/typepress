@@ -87,14 +87,18 @@ jobs:
     name: Publish to npm
     needs: github-release
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/node
     steps:
       - uses: actions/checkout@v4
 
       - name: Check if version already published
         id: check
+        working-directory: .
         run: |
-          VER=$(node -p "require('./package.json').version")
-          PUB=$(npm view typepress version 2>/dev/null || echo "0.0.0")
+          VER=$(node -p "require('./packages/node/package.json').version")
+          PUB=$(npm view typepress-pdf version 2>/dev/null || echo "0.0.0")
           echo "local=$VER published=$PUB"
           if [ "$VER" = "$PUB" ]; then
             echo "published=true" >> $GITHUB_OUTPUT
@@ -121,13 +125,17 @@ jobs:
     permissions:
       id-token: write  # required for PyPI OIDC
       contents: read
+    defaults:
+      run:
+        working-directory: packages/python
     steps:
       - uses: actions/checkout@v4
 
       - name: Check if version already published
         id: check
+        working-directory: .
         run: |
-          VER=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          VER=$(python3 -c "import tomllib; print(tomllib.load(open('packages/python/pyproject.toml','rb'))['project']['version'])")
           PUB=$(pip index versions typepress 2>/dev/null | head -1 | grep -oP '[\d.]+' || echo "0.0.0")
           echo "local=$VER published=$PUB"
           if [ "$VER" = "$PUB" ]; then
@@ -146,4 +154,5 @@ jobs:
         if: steps.check.outputs.published == 'false'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
+          packages-dir: packages/python/dist
           password: ${{ secrets.PYPI_TOKEN }}
