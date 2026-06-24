@@ -9,6 +9,7 @@
 // Cache: ~/.cache/typepress/fonts/NotoColorEmoji-COLR.ttf
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 const COLR_FONT_URL: &str =
     "https://cdn.jsdelivr.net/gh/googlefonts/noto-emoji@main/fonts/Noto-COLRv1.ttf";
@@ -72,8 +73,15 @@ fn download_colr_font(dest: &PathBuf) -> Result<(), String> {
     let parent = dest.parent().ok_or("no parent dir")?;
     std::fs::create_dir_all(parent).map_err(|e| format!("mkdir: {e}"))?;
 
-    // Download
-    let response = reqwest::blocking::get(COLR_FONT_URL).map_err(|e| format!("download: {e}"))?;
+    // Download with timeout
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("client: {e}"))?;
+    let response = client
+        .get(COLR_FONT_URL)
+        .send()
+        .map_err(|e| format!("download: {e}"))?;
     let bytes = response.bytes().map_err(|e| format!("read: {e}"))?;
 
     if bytes.len() < 100_000 {
@@ -115,7 +123,20 @@ tt.save(sys.argv[1])
         .spawn()
         .map_err(|e| format!("python3: {e}"))?;
 
-    let output = child.wait().map_err(|e| format!("wait: {e}"))?;
+    // 10-minute timeout for font subsetting; kill if exceeded
+    let (tx, rx) = std::sync::mpsc::channel();
+    let pid = child.id();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait());
+    });
+    let output = match rx.recv_timeout(Duration::from_secs(600)) {
+        Ok(Ok(status)) => status,
+        Ok(Err(e)) => return Err(format!("wait: {e}")),
+        Err(_) => {
+            let _ = Command::new("kill").arg(format!("{pid}")).status();
+            return Err("python3 timed out after 600s".to_string());
+        }
+    };
     if !output.success() {
         return Err("fontTools rename failed".into());
     }

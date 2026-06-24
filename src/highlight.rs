@@ -124,9 +124,10 @@ fn html_escape(s: &str) -> String {
 }
 
 fn html_decode(s: &str) -> String {
-    s.replace("&lt;", "<")
+    // Decode &amp; first to avoid double-decoding (e.g., &amp;lt; → &lt; not <)
+    s.replace("&amp;", "&")
+        .replace("&lt;", "<")
         .replace("&gt;", ">")
-        .replace("&amp;", "&")
         .replace("&quot;", "\"")
         .replace("&#39;", "'")
 }

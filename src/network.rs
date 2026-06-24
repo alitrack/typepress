@@ -13,6 +13,15 @@
 use anyhow::{Context, Result};
 use regex::Regex;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+/// Create a blocking HTTP client with a 30-second timeout.
+fn http_client() -> reqwest::blocking::Client {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .expect("reqwest client creation should not fail")
+}
 
 /// Download a URL to a temp file, with caching.
 fn download_to_cache(url: &str, cache_subdir: &str) -> Result<PathBuf> {
@@ -43,8 +52,10 @@ fn download_to_cache(url: &str, cache_subdir: &str) -> Result<PathBuf> {
         return Ok(dest);
     }
 
-    let response =
-        reqwest::blocking::get(url).with_context(|| format!("Failed to download: {}", url))?;
+    let response = http_client()
+        .get(url)
+        .send()
+        .with_context(|| format!("Failed to download: {}", url))?;
     let bytes = response
         .bytes()
         .with_context(|| format!("Failed to read body: {}", url))?;
@@ -128,7 +139,7 @@ pub fn download_remote_images(html: &mut String) -> Result<(usize, Vec<PathBuf>)
     let img_re =
         Regex::new(r#"(?i)<img\b[^>]*?\bsrc\s*=\s*["'](https?://[^"']+)["'][^>]*>"#).unwrap();
 
-    let count = 0;
+    let mut count = 0;
     let mut paths = Vec::new();
     let html_clone = html.clone();
 
@@ -148,6 +159,7 @@ pub fn download_remote_images(html: &mut String) -> Result<(usize, Vec<PathBuf>)
                 *html = html.replacen(full_tag, &new_tag, 1);
                 eprintln!("Image: downloaded {} → {}", url, path.display());
                 paths.push(path);
+                count += 1;
             }
             Err(e) => {
                 eprintln!("Warning: Image download failed for {}: {}", url, e);

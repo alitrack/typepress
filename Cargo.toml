@@ -2,7 +2,7 @@
 name = "typepress"
 version = "0.3.2"
 edition = "2024"
-description = "Pure Rust HTML/CSS → PDF/SVG/PNG engine. No browser required."
+description = "Pure Rust HTML/CSS → PDF engine. No browser required."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/alitrack/typepress"
 
@@ -19,14 +19,12 @@ regex = "1"
 mermaid-render = { version = "0.1", optional = true }
 # Markdown input
 pulldown-cmark = "0.13"
-# Multi-format output (PNG rasterization)
-tiny-skia = "0.11"
 # Error handling
 anyhow = "1"
 tempfile = "3"
 # Config
 serde = { version = "1", features = ["derive"] }
-noyalib = "0.0"
+serde_yaml = "0.9"
 # HTTP for @font-face web font downloading
 reqwest = { version = "0.12", features = ["blocking"] }
 # Code syntax highlighting

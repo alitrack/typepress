@@ -11,6 +11,15 @@
 use anyhow::{Context, Result};
 use regex::Regex;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+/// Create a blocking HTTP client with a 30-second timeout.
+fn http_client() -> reqwest::blocking::Client {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .expect("reqwest client creation should not fail")
+}
 
 #[derive(Debug, Clone)]
 pub struct FontFace {
@@ -112,8 +121,10 @@ fn download_font(url: &str) -> Result<PathBuf> {
         return Ok(dest);
     }
 
-    let response =
-        reqwest::blocking::get(url).with_context(|| format!("Failed to download font: {}", url))?;
+    let response = http_client()
+        .get(url)
+        .send()
+        .with_context(|| format!("Failed to download font: {}", url))?;
     let bytes = response
         .bytes()
         .with_context(|| format!("Failed to read font body: {}", url))?;

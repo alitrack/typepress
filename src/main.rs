@@ -1462,13 +1462,14 @@ fn main() -> Result<()> {
     let to_stdout = cli.output.as_ref().is_some_and(|o| o.as_os_str() == "-");
 
     // Config-driven output (from YAML output section)
-    if let Some(oc) = cfg.as_ref().and_then(|c| c.output.as_ref()) {
-        if let Some(ref path) = oc.pdf {
-            std::fs::write(path, &pdf)?;
-            eprintln!("PDF written to {}", path.display());
-        }
+    if let Some(ref path) = cfg
+        .as_ref()
+        .and_then(|c| c.output.as_ref())
+        .and_then(|oc| oc.pdf.as_ref())
+    {
+        std::fs::write(path, &pdf)?;
+        eprintln!("PDF written to {}", path.display());
     }
-
     // CLI-driven output
     if to_stdout {
         use std::io::Write;
