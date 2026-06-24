@@ -102,8 +102,8 @@ fn hex_to_char(s: &str) -> Option<char> {
     // Handle UTF-16 surrogate pairs (PDF encodes supplementary-plane
     // characters like U+1F9EC as <D83E DDEC> in bfchar entries)
     if (0xD800..=0xDBFF).contains(&((val >> 16) & 0xFFFF)) {
-        let high = ((val >> 16) & 0xFFFF) as u32;
-        let low = (val & 0xFFFF) as u32;
+        let high = (val >> 16) & 0xFFFF;
+        let low = val & 0xFFFF;
         if (0xDC00..=0xDFFF).contains(&low) {
             let scalar = 0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00);
             return char::from_u32(scalar);
@@ -146,7 +146,7 @@ fn build_font_cmaps(doc: &Document) -> BTreeMap<String, FontInfo> {
                 .get(b"Subtype")
                 .ok()
                 .and_then(|s| s.as_name().ok())
-                .map_or(false, |n| n == b"Type3");
+                .is_some_and(|n| n == b"Type3");
 
             // Try ToUnicode CMap
             if let Ok(tu) = font_dict.get(b"ToUnicode")
