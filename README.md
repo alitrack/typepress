@@ -14,7 +14,7 @@ TypePress renders HTML and Markdown to PDF using fulgur (Blitz → Taffy → Kri
 - **LaTeX Math** — `$...$` and `$$...$$` rendered via katex-rs
 - **Mermaid Diagrams** — Flowchart, sequence, class, state, ER diagrams
 - **CJK Support** — Chinese/Japanese/Korean with automatic font subsetting
-- **Multi-Format** — PDF, SVG, PNG output
+- **Single Binary** — ~15MB, zero dependencies, no Chromium/Node.js
 - **CSS Grid/Flexbox → Table** — Automatic layout degradation for taffy compatibility
 - **Header/Footer** — CSS GCPM running elements
 - **@font-face** — Web font loading and embedding
@@ -25,7 +25,14 @@ TypePress renders HTML and Markdown to PDF using fulgur (Blitz → Taffy → Kri
 ### Install
 
 ```bash
+# Rust / Cargo
 cargo install typepress
+
+# npm (Node.js)
+npm install typepress-pdf
+
+# pip (Python)
+pip install typepress
 ```
 
 ### Basic Usage
@@ -40,9 +47,6 @@ typepress page.html -o out.pdf -f /usr/share/fonts/opentype/noto/NotoSansCJK-Reg
 # With math support
 typepress doc.md -o out.pdf --math
 
-# PDF → SVG (multi-page)
-typepress existing.pdf --format svg -o out.svg
-
 # YAML-driven workflow
 typepress render  # auto-detects typepress.yaml
 ```
@@ -56,7 +60,6 @@ input: doc.md
 from: md
 output:
   pdf: out.pdf
-  svg: out.svg
 page:
   size: A4
 math: true

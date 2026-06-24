@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.request import urlretrieve
 
-__version__ = "0.3.2"
+__version__ = "0.4.0"
 
 _BINARY_NAME = "typepress"
 if sys.platform == "win32":
@@ -114,7 +114,7 @@ def _resolve_binary(binary_path: Optional[str | Path] = None) -> Path:
 
 # ── API ─────────────────────────────────────────────────────────────────
 
-_FORMATS = frozenset({"pdf", "svg", "png"})
+_FORMATS = frozenset({"pdf"})
 _INPUT_FORMATS = frozenset({"html", "md"})
 
 
@@ -137,7 +137,7 @@ class TypePress:
         size: Optional[str] = None,
         landscape: bool = False,
         margin: Optional[str] = None,
-        scale: float = 2.0,
+        scale: float = 1.0,
         css_files: Optional[list[str | Path]] = None,
         fonts: Optional[list[str | Path]] = None,
         header: Optional[str] = None,
@@ -153,16 +153,12 @@ class TypePress:
         cmd = [str(self._binary)]
         if from_fmt == "md":
             cmd.extend(["--from", "md"])
-        if fmt != "pdf":
-            cmd.extend(["--format", fmt])
         if size:
             cmd.extend(["--size", size])
         if landscape:
             cmd.append("--landscape")
         if margin:
             cmd.extend(["--margin", margin])
-        if scale != 2.0:
-            cmd.extend(["--scale", str(scale)])
         if css_files:
             for f in css_files:
                 cmd.extend(["--css", str(f)])
@@ -188,14 +184,6 @@ class TypePress:
 
     def md_to_pdf(self, input: str | Path, output: str | Path, **kwargs) -> Path:
         self.convert(input, output, fmt="pdf", from_fmt="md", **kwargs)
-        return Path(output)
-
-    def html_to_svg(self, input: str | Path, output: str | Path, **kwargs) -> Path:
-        self.convert(input, output, fmt="svg", from_fmt="html", **kwargs)
-        return Path(output)
-
-    def html_to_png(self, input: str | Path, output: str | Path, **kwargs) -> Path:
-        self.convert(input, output, fmt="png", from_fmt="html", **kwargs)
         return Path(output)
 
 

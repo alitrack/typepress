@@ -9,7 +9,6 @@
 
 use assert_cmd::Command;
 use predicates::prelude::*;
-use regex::Regex;
 use std::path::PathBuf;
 
 fn tmp_path(name: &str) -> PathBuf {
@@ -18,6 +17,13 @@ fn tmp_path(name: &str) -> PathBuf {
 
 fn binary() -> Command {
     Command::cargo_bin("typepress").unwrap()
+}
+
+fn has_mermaid_render() -> bool {
+    std::process::Command::new("mermaid-render")
+        .arg("--version")
+        .output()
+        .is_ok()
 }
 
 // ── Basic CLI tests ──────────────────────────────────────────────────────
@@ -95,8 +101,11 @@ fn cli_md_with_math() {
 }
 
 #[test]
-#[test]
 fn cli_mermaid_pdf_keeps_vector_content() {
+    if !has_mermaid_render() {
+        eprintln!("SKIP: mermaid-render not installed");
+        return;
+    }
     let out = tmp_path("cli_mermaid.pdf");
     let _ = std::fs::remove_file(&out);
 

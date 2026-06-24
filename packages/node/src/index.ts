@@ -8,7 +8,7 @@ import { createGunzip } from "node:zlib";
 import { createWriteStream as fsCreateWriteStream } from "node:fs";
 import { Readable } from "node:stream";
 
-const VERSION = "0.3.2";
+const VERSION = "0.4.0";
 const GITHUB_RELEASES = "https://github.com/alitrack/typepress/releases/download";
 
 const BINARY_NAME = platform === "win32" ? "typepress.exe" : "typepress";
@@ -114,7 +114,7 @@ function resolveBinary(binaryPath?: string): string {
 
 // ── Types ───────────────────────────────────────────────────────────────
 
-export type OutputFormat = "pdf" | "svg" | "png";
+export type OutputFormat = "pdf";
 export type InputFormat = "html" | "md";
 
 export interface ConvertOptions {
@@ -156,11 +156,9 @@ export class TypePress {
 
     const args: string[] = [];
     if (inputFormat === "md") args.push("--from", "md");
-    if (format !== "pdf") args.push("--format", format);
     if (size) args.push("--size", size);
     if (landscape) args.push("--landscape");
     if (margin) args.push("--margin", margin);
-    if (scale !== undefined && scale !== 2.0) args.push("--scale", String(scale));
     if (cssFiles) for (const f of cssFiles) args.push("--css", f);
     if (fonts) for (const f of fonts) args.push("--font", f);
     if (header) args.push("--header", header);
@@ -186,16 +184,6 @@ export class TypePress {
 
   async mdToPdf(input: string, output: string, options: Omit<ConvertOptions, "format" | "inputFormat"> = {}): Promise<string> {
     await this.convert(input, output, { ...options, format: "pdf", inputFormat: "md" });
-    return output;
-  }
-
-  async htmlToSvg(input: string, output: string, options: Omit<ConvertOptions, "format" | "inputFormat"> = {}): Promise<string> {
-    await this.convert(input, output, { ...options, format: "svg", inputFormat: "html" });
-    return output;
-  }
-
-  async htmlToPng(input: string, output: string, options: Omit<ConvertOptions, "format" | "inputFormat"> = {}): Promise<string> {
-    await this.convert(input, output, { ...options, format: "png", inputFormat: "html" });
     return output;
   }
 }

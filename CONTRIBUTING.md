@@ -56,7 +56,7 @@ src/
 ├── config.rs     # YAML config (TypePressConfig)
 ├── fonts.rs      # @font-face parsing, font resolution
 ├── highlight.rs  # Code syntax highlighting (syntect)
-└── svg.rs        # PDF → SVG Unicode text extraction
+└── svg.rs        # Remaining SVG utilities (PDF→SVG text extraction → pdf2svg)
 tests/
 ├── reftest.rs    # Integration tests
 └── cli.rs        # CLI tests

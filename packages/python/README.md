@@ -22,18 +22,13 @@ tp.html_to_pdf(
 # Markdown → PDF
 tp.md_to_pdf("report.md", "report.pdf")
 
-# HTML → PNG (via pymupdf fallback)
-tp.html_to_png("report.html", "report.png")
-
 # Full API
 tp.convert(
     input="report.html",
     output="report.pdf",
-    format="pdf",       # pdf | svg | png
     size="A4",
     landscape=False,
     margin="20mm",
-    scale=2.0,          # PNG scale factor
 )
 ```
 

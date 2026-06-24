@@ -33,21 +33,17 @@ Create a TypePress instance. Auto-discovers or downloads the binary.
 
 ### `tp.convert(input, output, options?)`
 
-Convert HTML/Markdown → PDF/SVG/PNG.
+Convert HTML/Markdown → PDF.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `format` | `'pdf' \| 'svg' \| 'png'` | `'pdf'` | Output format |
 | `size` | `string` | — | Page size: A4, A3, Letter |
 | `landscape` | `boolean` | `false` | Landscape orientation |
 | `margin` | `string` | — | Margins e.g. `'20mm'` |
-| `scale` | `number` | `2.0` | PNG scale factor |
 | `inputFormat` | `'html' \| 'md'` | `'html'` | Input format |
 
 ### `tp.htmlToPdf(input, output, options?)`
 ### `tp.mdToPdf(input, output, options?)`
-### `tp.htmlToSvg(input, output, options?)`
-### `tp.htmlToPng(input, output, options?)`
 
 Convenience methods. Return the output path.
 

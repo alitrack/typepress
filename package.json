@@ -1,6 +1,6 @@
 {
   "name": "typepress",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Pure Rust HTML/CSS → PDF engine — wkhtmltopdf replacement",
   "keywords": ["html-to-pdf", "pdf", "wkhtmltopdf", "markdown", "css", "rust"],
   "homepage": "https://github.com/alitrack/typepress",

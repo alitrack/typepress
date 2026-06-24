@@ -1,6 +1,6 @@
 {
   "name": "typepress-pdf",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Pure Rust HTML/CSS → PDF engine — Node.js binding",
   "license": "MIT",
   "repository": "github:alitrack/typepress",
