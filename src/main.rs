@@ -16,7 +16,6 @@ use std::path::{Path, PathBuf};
 
 mod config;
 mod fonts;
-mod svg;
 use config::TypePressConfig;
 use typepress::css::KATEX_CSS;
 use typepress::{inject_header_footer, markdown_to_html};
@@ -1102,44 +1101,6 @@ fn render_png_from_pdf(pdf_bytes: &[u8], scale: f32) -> Result<Vec<u8>> {
     Ok(png_data)
 }
 
-fn render_svg_from_pdf(pdf_bytes: &[u8]) -> Result<String> {
-    let raw_svg = svg::svg_unicode(pdf_bytes, 1)?;
-    Ok(svg::embed_svg_fonts(&raw_svg, pdf_bytes))
-}
-
-/// Generate multi-page output filenames from a base path.
-/// e.g., "out.svg" → ["out_page1.svg", "out_page2.svg"]
-/// If only 1 page, returns just ["out.svg"].
-fn page_output_paths(base: &Path, page_count: u32) -> Vec<PathBuf> {
-    if page_count <= 1 {
-        return vec![base.to_path_buf()];
-    }
-    let stem = base.file_stem().unwrap_or_default().to_string_lossy();
-    let ext = base.extension().unwrap_or_default().to_string_lossy();
-    let parent = base.parent().unwrap_or(Path::new("."));
-    (1..=page_count)
-        .map(|p| {
-            if ext.is_empty() {
-                parent.join(format!("{stem}_page{p}"))
-            } else {
-                parent.join(format!("{stem}_page{p}.{ext}"))
-            }
-        })
-        .collect()
-}
-
-fn write_svg_multi(pdf_bytes: &[u8], output: &Path) -> Result<()> {
-    let pages = svg::page_count(pdf_bytes)?;
-    let paths = page_output_paths(output, pages);
-    for (i, path) in paths.iter().enumerate() {
-        let raw_svg = svg::svg_unicode(pdf_bytes, (i + 1) as u32)?;
-        let embedded = svg::embed_svg_fonts(&raw_svg, pdf_bytes);
-        std::fs::write(path, embedded)?;
-        eprintln!("SVG page {} written to {}", i + 1, path.display());
-    }
-    Ok(())
-}
-
 // ── Main ───────────────────────────────────────────────────────────────
 
 fn main() -> Result<()> {
@@ -1204,7 +1165,9 @@ fn main() -> Result<()> {
         let to_stdout = cli.output.as_ref().is_some_and(|o| o.as_os_str() == "-");
         if to_stdout {
             match cli.format.as_str() {
-                "svg" => print!("{}", render_svg_from_pdf(&pdf_bytes)?),
+                "svg" => eprintln!(
+                    "SVG output from PDF input is not supported. Use `--format pdf` instead."
+                ),
                 "png" => {
                     use std::io::Write;
                     std::io::stdout().write_all(&render_png_from_pdf(&pdf_bytes, cli.scale)?)?;
@@ -1216,7 +1179,9 @@ fn main() -> Result<()> {
             }
         } else if let Some(ref output) = cli.output {
             match cli.format.as_str() {
-                "svg" => write_svg_multi(&pdf_bytes, output)?,
+                "svg" => eprintln!(
+                    "SVG output from PDF input is not supported. Use `--format pdf` instead."
+                ),
                 "png" => {
                     std::fs::write(output, render_png_from_pdf(&pdf_bytes, cli.scale)?)?;
                     eprintln!(
@@ -1579,7 +1544,7 @@ fn main() -> Result<()> {
             eprintln!("PDF written to {}", path.display());
         }
         if let Some(ref path) = oc.svg {
-            write_svg_multi(&pdf, path)?;
+            eprintln!("SVG output not yet supported. Skipping {}.", path.display());
         }
         if let Some(ref path) = oc.png {
             std::fs::write(path, render_png_from_pdf(&pdf, cli.scale)?)?;
@@ -1593,7 +1558,7 @@ fn main() -> Result<()> {
     // CLI-driven output (--format + -o). Skip if YAML config already handles this format.
     if to_stdout {
         match cli.format.as_str() {
-            "svg" => print!("{}", render_svg_from_pdf(&pdf)?),
+            "svg" => eprintln!("SVG output not yet supported. Use `--format pdf` instead."),
             "png" => {
                 use std::io::Write;
                 std::io::stdout().write_all(&render_png_from_pdf(&pdf, cli.scale)?)?;
@@ -1609,13 +1574,12 @@ fn main() -> Result<()> {
             .as_ref()
             .and_then(|c| c.output.as_ref())
             .is_some_and(|oc| match cli.format.as_str() {
-                "svg" => oc.svg.is_some(),
                 "png" => oc.png.is_some(),
                 _ => oc.pdf.is_some(),
             });
         if !yaml_has_format {
             match cli.format.as_str() {
-                "svg" => write_svg_multi(&pdf, output)?,
+                "svg" => eprintln!("SVG output not yet supported. Use `--format pdf` instead."),
                 "png" => {
                     std::fs::write(output, render_png_from_pdf(&pdf, cli.scale)?)?;
                     eprintln!(

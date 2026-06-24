@@ -7,7 +7,6 @@ pub mod emoji;
 pub mod fonts;
 pub mod highlight;
 pub mod network;
-pub mod svg;
 
 use anyhow::Result;
 use std::path::Path;
