@@ -14,6 +14,19 @@ use std::collections::BTreeMap;
 
 type CidMap = BTreeMap<u16, char>;
 
+/// Whether a CMap uses single-byte CIDs (Type3/COLR fonts with Identity
+/// encoding, as opposed to standard CID fonts with u16 CIDs).
+#[derive(Clone, Copy, PartialEq)]
+enum CidEncoding {
+    SingleByte,
+    U16,
+}
+
+struct FontInfo {
+    cmap: CidMap,
+    encoding: CidEncoding,
+}
+
 /// Parse a ToUnicode CMap stream and return a CID→char mapping.
 fn parse_tounicode_cmap(stream_data: &[u8]) -> CidMap {
     let s = String::from_utf8_lossy(stream_data);
@@ -83,15 +96,29 @@ fn hex_to_u32(s: &str) -> Option<u32> {
 }
 
 fn hex_to_char(s: &str) -> Option<char> {
-    hex_to_u32(s).and_then(char::from_u32)
+    let s = s.trim_matches(|c| c == '<' || c == '>');
+    let val = u32::from_str_radix(s, 16).ok()?;
+
+    // Handle UTF-16 surrogate pairs (PDF encodes supplementary-plane
+    // characters like U+1F9EC as <D83E DDEC> in bfchar entries)
+    if (0xD800..=0xDBFF).contains(&((val >> 16) & 0xFFFF)) {
+        let high = ((val >> 16) & 0xFFFF) as u32;
+        let low = (val & 0xFFFF) as u32;
+        if (0xDC00..=0xDFFF).contains(&low) {
+            let scalar = 0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00);
+            return char::from_u32(scalar);
+        }
+    }
+
+    char::from_u32(val)
 }
 
 // ── Font CMap resolution ───────────────────────────────────────────────
 
-/// Build a mapping from font name → CID→char map by parsing all ToUnicode
-/// CMaps in the PDF's font objects.
-fn build_font_cmaps(doc: &Document) -> BTreeMap<String, CidMap> {
-    let mut font_cmaps: BTreeMap<String, CidMap> = BTreeMap::new();
+/// Build a mapping from font name → (CMap, encoding) by parsing all
+/// ToUnicode CMaps and detecting font subtypes (Type3 = single-byte CID).
+fn build_font_cmaps(doc: &Document) -> BTreeMap<String, FontInfo> {
+    let mut font_info: BTreeMap<String, FontInfo> = BTreeMap::new();
 
     for (&page_num, &page_id) in &doc.get_pages() {
         let resources = resolve_page_resources(doc, page_id);
@@ -106,25 +133,45 @@ fn build_font_cmaps(doc: &Document) -> BTreeMap<String, CidMap> {
 
         for (name, font_ref) in &fonts {
             let name_str = String::from_utf8_lossy(name).into_owned();
-            if font_cmaps.contains_key(&name_str) {
+            if font_info.contains_key(&name_str) {
                 continue;
             }
             let font_dict = match doc.dereference(font_ref) {
                 Ok((_, Object::Dictionary(d))) => d,
                 _ => continue,
             };
+
+            // Detect Type3 for single-byte CID encoding
+            let is_type3 = font_dict
+                .get(b"Subtype")
+                .ok()
+                .and_then(|s| s.as_name().ok())
+                .map_or(false, |n| n == b"Type3");
+
             // Try ToUnicode CMap
             if let Ok(tu) = font_dict.get(b"ToUnicode")
                 && let Ok((_, Object::Stream(stream))) = doc.dereference(tu)
             {
                 let cmap = parse_tounicode_cmap(&stream.content);
-                font_cmaps.insert(name_str, cmap);
+                if !cmap.is_empty() {
+                    font_info.insert(
+                        name_str,
+                        FontInfo {
+                            cmap,
+                            encoding: if is_type3 {
+                                CidEncoding::SingleByte
+                            } else {
+                                CidEncoding::U16
+                            },
+                        },
+                    );
+                }
             }
         }
         let _ = page_num; // suppress unused warning
     }
 
-    font_cmaps
+    font_info
 }
 
 fn resolve_page_resources(doc: &Document, page_id: lopdf::ObjectId) -> Option<lopdf::Dictionary> {
@@ -191,19 +238,28 @@ fn concat_matrix(current: &[f32; 6], new: &[f32; 6]) -> [f32; 6] {
 }
 
 /// Decode a PDF text string using the font's CID→Unicode CMap.
-/// For CID fonts, the bytes are raw glyph IDs (big-endian u16 pairs).
-/// For non-CID fonts, falls back to Latin-1.
 ///
-/// Auto-detects fulgur's interleaved format:
-/// [CID(2b)][ADJUST(2b)][CID(2b)][ADJUST(2b)]...
-/// Detection heuristic: if ALL odd-indexed 2-byte pairs share the same
-/// u16 value (consistent advance adjustments), the stream is interleaved
-/// and odd pairs are skipped. Otherwise all pairs are decoded as CIDs.
-fn decode_with_cmap(bytes: &[u8], cmap: &CidMap) -> String {
+/// For standard CID fonts, bytes are raw glyph IDs (big-endian u16 pairs).
+/// For Type3/COLR fonts with Identity encoding, bytes are single-byte CIDs.
+/// Auto-detects interleaved format where fulgur embeds advance adjustments
+/// between CID pairs: [CID(2b)][ADJ(2b)][CID(2b)][ADJ(2b)]...
+fn decode_with_cmap(bytes: &[u8], info: &FontInfo) -> String {
+    let cmap = &info.cmap;
     if cmap.is_empty() {
-        // No CMap → Latin-1 fallback
         return bytes.iter().map(|&b| b as char).collect();
     }
+
+    if info.encoding == CidEncoding::SingleByte {
+        return bytes
+            .iter()
+            .map(|&b| {
+                let cid = b as u16;
+                cmap.get(&cid).copied().unwrap_or('\u{FFFD}')
+            })
+            .collect();
+    }
+
+    // Standard CID font: u16 big-endian pairs with interleaved detection
     let pairs: Vec<u16> = bytes
         .chunks(2)
         .filter(|c| c.len() == 2)
@@ -233,7 +289,7 @@ fn estimate_width(text: &str, font_size: f32) -> f32 {
 
 pub fn extract_unicode_text(doc: &Document) -> Result<Vec<UnicodeTextItem>> {
     use lopdf::content::{Content, Operation};
-    let font_cmaps = build_font_cmaps(doc);
+    let font_info = build_font_cmaps(doc);
     let mut items = Vec::new();
 
     for (&page_num, &page_id) in &doc.get_pages() {
@@ -344,7 +400,7 @@ pub fn extract_unicode_text(doc: &Document) -> Result<Vec<UnicodeTextItem>> {
                     if let Some(text_obj) = operands.first()
                         && let Ok(bytes) = text_obj.as_str()
                     {
-                        let cmap = font_cmaps.get(&font_name);
+                        let cmap = font_info.get(&font_name);
                         let text = if let Some(c) = cmap {
                             decode_with_cmap(bytes, c)
                         } else {
@@ -370,7 +426,7 @@ pub fn extract_unicode_text(doc: &Document) -> Result<Vec<UnicodeTextItem>> {
                     if let Some(array_obj) = operands.first()
                         && let Ok(array) = array_obj.as_array()
                     {
-                        let cmap = font_cmaps.get(&font_name);
+                        let cmap = font_info.get(&font_name);
                         let mut combined = String::new();
                         for elem in array {
                             if let Ok(bytes) = elem.as_str() {
