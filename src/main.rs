@@ -1450,17 +1450,47 @@ fn main() -> Result<()> {
     let engine = builder.build();
     let mut pdf = engine.render_html(&html)?;
 
-    // --fit: if multi-page, scale CSS uniformly and re-render
+    // --fit: if multi-page, scale CSS uniformly and re-render to one page
+    // Uses binary search to find maximum zoom that still fits on one page,
+    // instead of the naive 0.95/pages formula that wastes whitespace.
     if cli.fit {
         let pages = typepress::css_layout::count_pdf_pages(&pdf);
         if pages > 1 {
-            let scale = 0.95 / pages as f64; // 95% safety margin
+            // Binary search: find max zoom ∈ [0, 1] producing exactly 1 page
+            let mut lo = 0.0_f64;
+            let mut hi = 1.0_f64;
+            for _ in 0..12 {
+                let mid = (lo + hi) / 2.0;
+                let scaled = typepress::css_layout::scale_css_for_fit(&html, mid);
+                let p = engine.render_html(&scaled)?;
+                if typepress::css_layout::count_pdf_pages(&p) <= 1 {
+                    lo = mid; // fits → try larger
+                } else {
+                    hi = mid; // too much → shrink
+                }
+            }
+            // 0.5% initial safety margin; post-validate loop below may shrink further
+            let mut scale = lo * 0.995;
+            for retry in 0..8 {
+                let scaled_html = typepress::css_layout::scale_css_for_fit(&html, scale);
+                let p = engine.render_html(&scaled_html)?;
+                if typepress::css_layout::count_pdf_pages(&p) <= 1 {
+                    pdf = p;
+                    break;
+                }
+                scale *= 0.97; // shrink 3% per retry to avoid overflow
+                if retry == 0 {
+                    eprintln!(
+                        "  Content overflow at {:.1}%, retrying at {:.1}%…",
+                        lo * 0.995 * 100.0,
+                        scale * 100.0,
+                    );
+                }
+            }
             eprintln!(
-                "Fitting {pages} pages → 1 page (scale {:.1}%)",
+                "Fitting {pages} pages → 1 page (max zoom {:.1}%)",
                 scale * 100.0
             );
-            let scaled_html = typepress::css_layout::scale_css_for_fit(&html, scale);
-            pdf = engine.render_html(&scaled_html)?;
             let new_pages = typepress::css_layout::count_pdf_pages(&pdf);
             eprintln!(" → {new_pages} page(s) after fitting");
         }
