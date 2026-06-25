@@ -56,6 +56,9 @@ pub struct Cli {
     pub zoom: f32,
     #[arg(long)]
     pub fit: bool,
+    /// Try increasingly larger page sizes until content fits on 1 page
+    #[arg(long)]
+    pub autofit: bool,
     /// Output diagnostic report after rendering (page count, sizes, warnings)
     #[arg(long)]
     pub check: bool,

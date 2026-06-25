@@ -268,8 +268,8 @@ fn main() -> Result<()> {
 
     // Merge: CLI args override YAML values.
     // Resolve page settings early (before cli partial-moves)
-    let resolved_size = cli.resolve_size();
-    let resolved_landscape = cli.resolve_landscape();
+    let mut resolved_size = cli.resolve_size();
+    let mut resolved_landscape = cli.resolve_landscape();
     let resolved_margin = cli.resolve_margin();
     let input_file = cli
         .input
@@ -621,13 +621,16 @@ fn main() -> Result<()> {
     }
     // --no-outline: invert bookmarks default
     let bookmarks = if cli.no_outline { false } else { cli.bookmarks };
-    if let Some(t) = cli.title {
+    let cli_title = cli.title.clone();
+    let cli_authors = cli.authors.clone();
+    let cli_language = cli.language.clone();
+    if let Some(t) = cli_title.clone() {
         builder = builder.title(t);
     }
-    if !cli.authors.is_empty() {
-        builder = builder.authors(cli.authors);
+    if !cli_authors.is_empty() {
+        builder = builder.authors(cli_authors.clone());
     }
-    if let Some(l) = cli.language {
+    if let Some(l) = cli_language.clone() {
         builder = builder.lang(l);
     }
     builder = builder
@@ -637,7 +640,7 @@ fn main() -> Result<()> {
     if let Some(ref bp) = base_path {
         builder = builder.base_path(bp);
     }
-    if let Some(a) = assets {
+    if let Some(a) = assets.clone() {
         builder = builder.assets(a);
     }
 
@@ -645,10 +648,147 @@ fn main() -> Result<()> {
     let mut pdf = engine.render_html(&html)?;
     let mut effective_zoom = cli.zoom as f64;
 
+    // --autofit: try increasingly larger page sizes + orientations,
+    // pick the combination that yields the highest zoom on a single page.
+    if cli.autofit {
+        let pages = typepress::css_layout::count_pdf_pages(&pdf);
+        if pages > 1 {
+            let base_size = resolved_size.as_deref().unwrap_or("A4");
+            let mut candidates: Vec<(&str, bool)> = vec![(base_size, false), (base_size, true)];
+            // Try one step larger if still not fitting
+            if base_size == "A4" {
+                candidates.push(("A3", false));
+                candidates.push(("A3", true));
+            } else if base_size == "A3" {
+                candidates.push(("A2", true));
+            }
+            let margin = resolved_margin;
+            let sys_fonts = !cli.no_system_fonts;
+            let bp = base_path.clone();
+            let ast = assets.clone();
+            let mut best: Option<(String, f64, bool, Vec<u8>)> = None;
+
+            for &(size_name, ls) in &candidates {
+                let mut eb = Engine::builder();
+                if !sys_fonts {
+                    eb = eb.system_fonts(false);
+                }
+                eb = eb.page_size(parse_page_size(size_name));
+                if ls {
+                    eb = eb.landscape(true);
+                }
+                if let Some(m) = margin {
+                    eb = eb.margin(m);
+                }
+                if let Some(ref bp) = bp {
+                    eb = eb.base_path(bp.clone());
+                }
+                if let Some(ref a) = ast {
+                    eb = eb.assets(a.clone());
+                }
+                let candidate_engine = eb.build();
+                let candidate_pdf = candidate_engine.render_html(&html)?;
+                let candidate_pages = typepress::css_layout::count_pdf_pages(&candidate_pdf);
+
+                let zoom = if candidate_pages <= 1 {
+                    1.0
+                } else {
+                    // Binary search fit
+                    let mut lo = 0.0_f64;
+                    let mut hi = 1.0_f64;
+                    for _ in 0..12 {
+                        let mid = (lo + hi) / 2.0;
+                        let scaled = typepress::css_layout::scale_css_for_fit(&html, mid);
+                        let p = candidate_engine.render_html(&scaled)?;
+                        if typepress::css_layout::count_pdf_pages(&p) <= 1 {
+                            lo = mid;
+                        } else {
+                            hi = mid;
+                        }
+                    }
+                    lo * 0.995
+                };
+
+                let is_better = match &best {
+                    None => true,
+                    Some((_, best_zoom, _, _)) => zoom > *best_zoom,
+                };
+                if is_better {
+                    best = Some((
+                        size_name.to_string(),
+                        zoom,
+                        ls,
+                        if zoom >= 0.999 {
+                            candidate_pdf
+                        } else {
+                            Vec::new()
+                        },
+                    ));
+                }
+            }
+
+            if let Some((ref size_name, zoom, ls, ref cached_pdf)) = best {
+                // Rebuild final engine with winning config
+                let mut eb = Engine::builder();
+                if !cli.no_system_fonts {
+                    eb = eb.system_fonts(true);
+                } else {
+                    eb = eb.system_fonts(false);
+                }
+                eb = eb.page_size(parse_page_size(size_name));
+                if ls {
+                    eb = eb.landscape(true);
+                }
+                if let Some(m) = resolved_margin {
+                    eb = eb.margin(m);
+                }
+                // Re-apply full metadata config
+                if let Some(ref t) = cli_title {
+                    eb = eb.title(t.clone());
+                }
+                if !cli_authors.is_empty() {
+                    eb = eb.authors(cli_authors.clone());
+                }
+                if let Some(ref l) = cli_language {
+                    eb = eb.lang(l.clone());
+                }
+                eb = eb
+                    .bookmarks(bookmarks)
+                    .tagged(cli.tagged)
+                    .pdf_ua(cli.pdf_ua);
+                if let Some(ref bp) = base_path {
+                    eb = eb.base_path(bp.clone());
+                }
+                if let Some(a) = assets.clone() {
+                    eb = eb.assets(a);
+                }
+                let final_engine = eb.build();
+
+                if zoom >= 0.999 {
+                    pdf = cached_pdf.clone();
+                } else {
+                    // Apply zoom scaling and re-render
+                    let scaled_html = typepress::css_layout::scale_css_for_fit(&html, zoom);
+                    pdf = final_engine.render_html(&scaled_html)?;
+                }
+
+                eprintln!(
+                    "Autofit: {} {} → 1 page at {:.1}% zoom",
+                    size_name,
+                    if ls { "landscape" } else { "portrait" },
+                    zoom * 100.0
+                );
+                effective_zoom = zoom;
+                resolved_size = Some(size_name.clone());
+                resolved_landscape = ls;
+            }
+        }
+    }
+
     // --fit: if multi-page, scale CSS uniformly and re-render to one page
     // Uses binary search to find maximum zoom that still fits on one page,
     // instead of the naive 0.95/pages formula that wastes whitespace.
-    if cli.fit {
+    if cli.fit && !cli.autofit {
         let pages = typepress::css_layout::count_pdf_pages(&pdf);
         if pages > 1 {
             // Binary search: find max zoom ∈ [0, 1] producing exactly 1 page
@@ -670,7 +810,7 @@ fn main() -> Result<()> {
             if let Some(html_max_w) = typepress::css_layout::max_explicit_width_px(&html) {
                 let page_dim = page_size_mm(resolved_size.as_deref().unwrap_or("A4"))
                     .unwrap_or((210.0, 297.0));
-                let (pw, _ph) = if landscape {
+                let (pw, _ph) = if resolved_landscape {
                     (page_dim.1, page_dim.0)
                 } else {
                     page_dim
@@ -763,7 +903,7 @@ fn main() -> Result<()> {
             Ok(report) => {
                 let size_mm = page_size_mm(resolved_size.as_deref().unwrap_or("A4"))
                     .unwrap_or((210.0, 297.0));
-                let (pw, ph) = if landscape {
+                let (pw, ph) = if resolved_landscape {
                     (size_mm.1, size_mm.0)
                 } else {
                     size_mm
@@ -779,7 +919,11 @@ fn main() -> Result<()> {
                     "║  Page size:  {:>4.0}×{:<4.0} mm ({})",
                     pw,
                     ph,
-                    if landscape { "landscape" } else { "portrait" }
+                    if resolved_landscape {
+                        "landscape"
+                    } else {
+                        "portrait"
+                    }
                 );
                 println!("║  Pages:      {:<4}                   ", pages);
                 println!("║  Zoom:       {:<5.1}%                 ", zoom_pct);
