@@ -56,6 +56,9 @@ pub struct Cli {
     pub zoom: f32,
     #[arg(long)]
     pub fit: bool,
+    /// Output diagnostic report after rendering (page count, sizes, warnings)
+    #[arg(long)]
+    pub check: bool,
     // Metadata
     #[arg(long)]
     pub title: Option<String>,

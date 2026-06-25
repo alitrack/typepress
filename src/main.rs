@@ -643,6 +643,7 @@ fn main() -> Result<()> {
 
     let engine = builder.build();
     let mut pdf = engine.render_html(&html)?;
+    let mut effective_zoom = cli.zoom as f64;
 
     // --fit: if multi-page, scale CSS uniformly and re-render to one page
     // Uses binary search to find maximum zoom that still fits on one page,
@@ -712,6 +713,7 @@ fn main() -> Result<()> {
                 "Fitting {pages} pages → 1 page (max zoom {:.1}%)",
                 scale * 100.0
             );
+            effective_zoom = scale;
             let new_pages = typepress::css_layout::count_pdf_pages(&pdf);
             eprintln!(" → {new_pages} page(s) after fitting");
         }
@@ -719,6 +721,7 @@ fn main() -> Result<()> {
 
     // 5. Route output by format. YAML config triggers multi-format.
     let to_stdout = cli.output.as_ref().is_some_and(|o| o.as_os_str() == "-");
+    let mut pdf_path_for_check: Option<PathBuf> = None;
 
     // Config-driven output (from YAML output section)
     if let Some(ref path) = cfg
@@ -728,6 +731,7 @@ fn main() -> Result<()> {
     {
         std::fs::write(path, &pdf)?;
         eprintln!("PDF written to {}", path.display());
+        pdf_path_for_check = Some(path.to_path_buf());
     }
     // CLI-driven output
     if to_stdout {
@@ -742,6 +746,89 @@ fn main() -> Result<()> {
         if !yaml_has_pdf {
             std::fs::write(output, &pdf)?;
             eprintln!("PDF written to {}", output.display());
+            pdf_path_for_check = Some(output.clone());
+        }
+    }
+
+    // --check: diagnostic report
+    if cli.check {
+        let check_path = pdf_path_for_check.as_deref().unwrap_or_else(|| {
+            // No file output (e.g. stdout or YAML-only), write to temp
+            let tmp = std::env::temp_dir().join("typepress_check.pdf");
+            std::fs::write(&tmp, &pdf).ok();
+            // Leak the PathBuf to get &Path lifetime — tiny, one-shot allocation
+            Box::leak(Box::new(tmp)).as_path()
+        });
+        match fulgur::inspect::inspect(check_path) {
+            Ok(report) => {
+                let size_mm = page_size_mm(resolved_size.as_deref().unwrap_or("A4"))
+                    .unwrap_or((210.0, 297.0));
+                let (pw, ph) = if landscape {
+                    (size_mm.1, size_mm.0)
+                } else {
+                    size_mm
+                };
+                let zoom_pct = effective_zoom * 100.0;
+                let pages = report.pages;
+
+                println!();
+                println!("╔══════════════════════════════════════╗");
+                println!("║  TypePress Diagnostic Report         ║");
+                println!("╠══════════════════════════════════════╣");
+                println!(
+                    "║  Page size:  {:>4.0}×{:<4.0} mm ({})",
+                    pw,
+                    ph,
+                    if landscape { "landscape" } else { "portrait" }
+                );
+                println!("║  Pages:      {:<4}                   ", pages);
+                println!("║  Zoom:       {:<5.1}%                 ", zoom_pct);
+                println!(
+                    "║  Text items: {:<4}                   ",
+                    report.text_items.len()
+                );
+                println!(
+                    "║  Images:     {:<4}                   ",
+                    report.images.len()
+                );
+                if let Some(ref t) = report.metadata.title {
+                    println!("║  Title:      {}", t);
+                }
+                println!("╠══════════════════════════════════════╣");
+
+                let mut warnings: Vec<&str> = Vec::new();
+                if pages > 1 && !cli.fit {
+                    warnings.push("multi-page output (try --fit or --page-size A3)");
+                }
+                if zoom_pct > 0.1 && zoom_pct < 60.0 {
+                    warnings.push("zoom < 60% — text may be hard to read");
+                }
+                if report.text_items.is_empty() && report.images.is_empty() {
+                    warnings.push("no text or images — possible rendering failure");
+                }
+                if pages > 1 && cli.fit {
+                    warnings.push("--fit could not reduce to 1 page (try larger page)");
+                }
+
+                if warnings.is_empty() {
+                    println!("║  ✅  No issues detected              ║");
+                } else {
+                    for w in &warnings {
+                        // Truncate long warnings to fit the box width (36 chars minus prefix)
+                        let prefix = "║  ⚠  ";
+                        let max_len = 38 - prefix.len();
+                        if w.len() > max_len {
+                            println!("{} {}…", prefix, &w[..max_len - 1]);
+                        } else {
+                            println!("{}{}", prefix, w);
+                        }
+                    }
+                }
+                println!("╚══════════════════════════════════════╝");
+            }
+            Err(e) => {
+                eprintln!("Check: failed to inspect PDF: {e}");
+            }
         }
     }
 
