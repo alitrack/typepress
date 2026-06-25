@@ -530,3 +530,385 @@ pub fn process_math(html: &mut String) -> Result<usize> {
     *html = html.replace(ESCAPED_PLACEHOLDER, "\\$");
     Ok(count)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── escape_html ──────────────────────────────────────────────
+    #[test]
+    fn escape_html_ampersand() {
+        assert_eq!(escape_html("a & b"), "a &amp; b");
+    }
+
+    #[test]
+    fn escape_html_lt_gt() {
+        assert_eq!(escape_html("<div>"), "&lt;div&gt;");
+    }
+
+    #[test]
+    fn escape_html_quotes() {
+        assert_eq!(escape_html("\"hello\""), "&quot;hello&quot;");
+    }
+
+    #[test]
+    fn escape_html_single_quote() {
+        assert_eq!(escape_html("it's"), "it&#39;s");
+    }
+
+    #[test]
+    fn escape_html_preserves_plain_text() {
+        assert_eq!(escape_html("hello world"), "hello world");
+    }
+
+    #[test]
+    fn escape_html_all_special_chars() {
+        assert_eq!(
+            escape_html("if a < b && c > d then \"yes\""),
+            "if a &lt; b &amp;&amp; c &gt; d then &quot;yes&quot;"
+        );
+    }
+
+    // ── unicode_superscript_char ─────────────────────────────────
+    #[test]
+    fn superscript_digits() {
+        assert_eq!(unicode_superscript_char('0'), Some('⁰'));
+        assert_eq!(unicode_superscript_char('5'), Some('⁵'));
+        assert_eq!(unicode_superscript_char('9'), Some('⁹'));
+    }
+
+    #[test]
+    fn superscript_operators() {
+        assert_eq!(unicode_superscript_char('+'), Some('⁺'));
+        assert_eq!(unicode_superscript_char('-'), Some('⁻'));
+        assert_eq!(unicode_superscript_char('='), Some('⁼'));
+    }
+
+    #[test]
+    fn superscript_lowercase_letters() {
+        assert_eq!(unicode_superscript_char('n'), Some('ⁿ'));
+        assert_eq!(unicode_superscript_char('i'), Some('ⁱ'));
+        assert_eq!(unicode_superscript_char('w'), Some('ʷ'));
+    }
+
+    #[test]
+    fn superscript_greek() {
+        assert_eq!(unicode_superscript_char('β'), Some('ᵝ'));
+        assert_eq!(unicode_superscript_char('θ'), Some('ᶿ'));
+        assert_eq!(unicode_superscript_char('χ'), Some('ᵡ'));
+    }
+
+    #[test]
+    fn superscript_unknown_char_returns_none() {
+        assert_eq!(unicode_superscript_char('X'), None);
+        assert_eq!(unicode_superscript_char('日'), None);
+        assert_eq!(unicode_superscript_char(' '), None);
+    }
+
+    // ── unicode_subscript_char ───────────────────────────────────
+    #[test]
+    fn subscript_digits() {
+        assert_eq!(unicode_subscript_char('0'), Some('₀'));
+        assert_eq!(unicode_subscript_char('5'), Some('₅'));
+        assert_eq!(unicode_subscript_char('9'), Some('₉'));
+    }
+
+    #[test]
+    fn subscript_operators() {
+        assert_eq!(unicode_subscript_char('+'), Some('₊'));
+        assert_eq!(unicode_subscript_char('-'), Some('₋'));
+    }
+
+    #[test]
+    fn subscript_lowercase_letters() {
+        assert_eq!(unicode_subscript_char('a'), Some('ₐ'));
+        assert_eq!(unicode_subscript_char('i'), Some('ᵢ'));
+        assert_eq!(unicode_subscript_char('n'), Some('ₙ'));
+    }
+
+    #[test]
+    fn subscript_unknown_char_returns_none() {
+        assert_eq!(unicode_subscript_char('Z'), None);
+        assert_eq!(unicode_subscript_char('日'), None);
+    }
+
+    // ── unicode_superscript / unicode_subscript ──────────────────
+    #[test]
+    fn unicode_superscript_string() {
+        assert_eq!(unicode_superscript("23"), Some("²³".to_string()));
+        assert_eq!(unicode_superscript("ni"), Some("ⁿⁱ".to_string()));
+        assert_eq!(unicode_superscript("n+1"), Some("ⁿ⁺¹".to_string()));
+    }
+
+    #[test]
+    fn unicode_superscript_fails_on_unknown() {
+        assert_eq!(unicode_superscript("X"), None);
+        assert_eq!(unicode_superscript("2X"), None);
+    }
+
+    #[test]
+    fn unicode_subscript_string() {
+        assert_eq!(unicode_subscript("12"), Some("₁₂".to_string()));
+        assert_eq!(unicode_subscript("ai"), Some("ₐᵢ".to_string()));
+    }
+
+    #[test]
+    fn unicode_subscript_fails_on_unknown() {
+        assert_eq!(unicode_subscript("Z"), None);
+        assert_eq!(unicode_subscript("iZ"), None);
+    }
+
+    // ── is_large_operator_text ───────────────────────────────────
+    #[test]
+    fn large_operator_integral() {
+        assert!(is_large_operator_text("∫"));
+        assert!(is_large_operator_text("  ∫  "));
+    }
+
+    #[test]
+    fn large_operator_sum_product() {
+        assert!(is_large_operator_text("∑"));
+        assert!(is_large_operator_text("∏"));
+    }
+
+    #[test]
+    fn non_large_operator() {
+        assert!(!is_large_operator_text("x"));
+        assert!(!is_large_operator_text("+"));
+        assert!(!is_large_operator_text("α"));
+    }
+
+    // ── render_superscript_text ──────────────────────────────────
+    #[test]
+    fn render_superscript_mappable() {
+        let result = render_superscript_text("2");
+        assert_eq!(result, "²");
+    }
+
+    #[test]
+    fn render_superscript_unmappable_fallback() {
+        // "HELLO" contains uppercase letters that can't be superscripted
+        let result = render_superscript_text("HELLO");
+        assert!(result.contains("txp-script-sup"));
+        assert!(result.contains("HELLO"));
+    }
+
+    // ── render_script_stack_fallback ─────────────────────────────
+    #[test]
+    fn script_stack_base_only() {
+        let result = render_script_stack_fallback("x", None, None);
+        assert!(result.contains("x"));
+        assert!(result.contains("txp-script-base"));
+    }
+
+    #[test]
+    fn script_stack_with_over() {
+        let result = render_script_stack_fallback("x", Some("2"), None);
+        assert!(result.contains("x"));
+        assert!(result.contains("2"));
+        assert!(result.contains("txp-script-over"));
+        assert!(!result.contains("txp-script-under"));
+    }
+
+    #[test]
+    fn script_stack_with_both() {
+        let result = render_script_stack_fallback("A", Some("B"), Some("C"));
+        assert!(result.contains("A"));
+        assert!(result.contains("B"));
+        assert!(result.contains("C"));
+    }
+
+    // ── render_large_operator_limits ─────────────────────────────
+    #[test]
+    fn large_op_with_over() {
+        let result = render_large_operator_limits("∑", Some("∞"), None);
+        assert!(result.contains("∑"));
+        assert!(result.contains("∞"));
+        assert!(result.contains("txp-op-over"));
+    }
+
+    #[test]
+    fn large_op_with_under() {
+        let result = render_large_operator_limits("∏", None, Some("i=1"));
+        assert!(result.contains("∏"));
+        assert!(result.contains("i=1"));
+        assert!(result.contains("txp-op-under"));
+    }
+
+    #[test]
+    fn large_op_with_both() {
+        let result = render_large_operator_limits("∫", Some("∞"), Some("0"));
+        assert!(result.contains("∫"));
+        assert!(result.contains("∞"));
+        assert!(result.contains("0"));
+    }
+
+    // ── math_fallback_markup ─────────────────────────────────────
+    #[test]
+    fn fallback_inline() {
+        let result = math_fallback_markup("x^2", false);
+        assert!(result.contains("txp-math-inline"));
+        assert!(result.contains("txp-math-error"));
+    }
+
+    #[test]
+    fn fallback_display() {
+        let result = math_fallback_markup("E=mc^2", true);
+        assert!(result.contains("txp-math-display"));
+        assert!(result.contains("txp-math-error"));
+    }
+
+    #[test]
+    fn fallback_escapes_html() {
+        let result = math_fallback_markup("a < b", false);
+        assert!(result.contains("&lt;"));
+        assert!(!result.contains("a < b"));
+    }
+
+    // ── render_math_markup ───────────────────────────────────────
+    #[test]
+    fn render_inline_math() {
+        let result = render_math_markup("x^2", false).unwrap();
+        assert!(result.contains("txp-math-inline"));
+        assert!(!result.contains("txp-math-display"));
+    }
+
+    #[test]
+    fn render_display_math() {
+        let result = render_math_markup("E = mc^2", true).unwrap();
+        assert!(result.contains("txp-math-display"));
+        assert!(!result.contains("txp-math-inline"));
+    }
+
+    #[test]
+    fn render_fraction() {
+        let result = render_math_markup(r"\frac{1}{2}", false).unwrap();
+        assert!(result.contains("txp-frac"));
+        assert!(result.contains("txp-frac-num"));
+        assert!(result.contains("txp-frac-den"));
+    }
+
+    #[test]
+    fn render_sqrt() {
+        let result = render_math_markup(r"\sqrt{4}", false).unwrap();
+        assert!(result.contains("txp-sqrt"));
+        assert!(result.contains("√"));
+    }
+
+    #[test]
+    fn render_subscript() {
+        let result = render_math_markup("x_1", false).unwrap();
+        assert!(result.contains("₁"));
+    }
+
+    #[test]
+    fn render_superscript() {
+        let result = render_math_markup("x^2", false).unwrap();
+        assert!(result.contains("²"));
+    }
+
+    #[test]
+    fn render_integral_with_limits() {
+        let result = render_math_markup(r"\int_0^\infty x dx", false).unwrap();
+        assert!(result.contains("txp-op-limits"));
+    }
+
+    #[test]
+    fn render_matrix() {
+        let result =
+            render_math_markup(r"\begin{pmatrix} a & b \\ c & d \end{pmatrix}", true).unwrap();
+        assert!(result.contains("txp-matrix"));
+    }
+
+    #[test]
+    fn render_invalid_latex_returns_err() {
+        let result = render_math_markup(r"\garbage{}", false);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn render_nth_root() {
+        let result = render_math_markup(r"\sqrt[3]{8}", false).unwrap();
+        assert!(result.contains("txp-root"));
+    }
+
+    // ── process_math ─────────────────────────────────────────────
+    #[test]
+    fn process_math_inline() {
+        let mut html = "the formula is $E = mc^2$ inside text".to_string();
+        let count = process_math(&mut html).unwrap();
+        assert!(count >= 1);
+        assert!(!html.contains("$E = mc^2$"));
+        assert!(html.contains("txp-math"));
+    }
+
+    #[test]
+    fn process_math_display() {
+        let mut html = "Here: $$\\sum_{i=1}^n i$$ is a sum".to_string();
+        let count = process_math(&mut html).unwrap();
+        assert!(count >= 1);
+        assert!(html.contains("txp-math-display"));
+        assert!(!html.contains("$$"));
+    }
+
+    #[test]
+    fn process_math_multiple() {
+        let mut html = "$a^2$ and $b^2$ and $$c^2$$".to_string();
+        let count = process_math(&mut html).unwrap();
+        assert!(count >= 2);
+        assert!(!html.contains('$'));
+    }
+
+    #[test]
+    fn process_math_preserves_escaped_dollar() {
+        let mut html = r"price is \$100 and $x^2$".to_string();
+        process_math(&mut html).unwrap();
+        assert!(html.contains(r"\$100"));
+        assert!(html.contains("txp-math"));
+    }
+
+    #[test]
+    fn process_math_no_math_returns_zero() {
+        let mut html = "just plain text".to_string();
+        let count = process_math(&mut html).unwrap();
+        assert_eq!(count, 0);
+        assert_eq!(html, "just plain text");
+    }
+
+    #[test]
+    fn process_math_invalid_expression_not_fatal() {
+        let mut html = "$valid$ and $\\invalid{ and $$also-ok$$".to_string();
+        let result = process_math(&mut html);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn process_math_keeps_text_outside_math() {
+        let mut html = "Introduction paragraph. $x=1$ Conclusion.".to_string();
+        process_math(&mut html).unwrap();
+        assert!(html.contains("Introduction paragraph."));
+        assert!(html.contains("Conclusion."));
+    }
+
+    // ── math_dom_to_html ─────────────────────────────────────────
+    #[test]
+    fn dom_text_node() {
+        use katex::mathml_tree::MathDomNode;
+        let text = katex::mathml_tree::TextNode {
+            text: "hello".to_string(),
+        };
+        let result = math_dom_to_html(&MathDomNode::Text(text));
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn dom_space_node() {
+        use katex::mathml_tree::MathDomNode;
+        let space = katex::mathml_tree::SpaceNode {
+            width: 0.0,
+            character: Some(" ".to_string()),
+        };
+        let result = math_dom_to_html(&MathDomNode::Space(space));
+        assert_eq!(result, " ");
+    }
+}

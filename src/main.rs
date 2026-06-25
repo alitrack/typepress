@@ -750,7 +750,6 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod preprocess_tests {
-    use super::*;
     use crate::math::process_math;
     use crate::math::render_math_markup;
 
