@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use fulgur::config::{Margin, PageSize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(

@@ -190,7 +190,10 @@ math:
         let config: TypePressConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.input.unwrap().to_str().unwrap(), "report.html");
         assert_eq!(config.from.unwrap(), "html");
-        assert_eq!(config.output.unwrap().pdf.unwrap().to_str().unwrap(), "report.pdf");
+        assert_eq!(
+            config.output.unwrap().pdf.unwrap().to_str().unwrap(),
+            "report.pdf"
+        );
         let page = config.page.unwrap();
         assert_eq!(page.size.unwrap(), "A4");
         assert!(page.landscape.unwrap());

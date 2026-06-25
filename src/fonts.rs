@@ -191,7 +191,8 @@ mod tests {
 
     #[test]
     fn parse_font_face_https_url() {
-        let css = r#"@font-face { font-family: "WebFont"; src: url("https://example.com/font.woff2"); }"#;
+        let css =
+            r#"@font-face { font-family: "WebFont"; src: url("https://example.com/font.woff2"); }"#;
         let faces = parse_font_faces(css);
         assert_eq!(faces.len(), 1);
         assert_eq!(faces[0].family, "WebFont");
@@ -268,7 +269,11 @@ mod tests {
         fs::write(dir.join("not_a_font.txt"), b"dummy").unwrap();
 
         let fonts = scan_font_dir(&dir);
-        assert!(fonts.len() >= 2, "Expected at least 2 fonts, found {}", fonts.len());
+        assert!(
+            fonts.len() >= 2,
+            "Expected at least 2 fonts, found {}",
+            fonts.len()
+        );
 
         fs::remove_dir_all(&dir).ok();
     }

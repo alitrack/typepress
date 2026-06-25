@@ -1,6 +1,5 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use regex::Regex;
-use std::path::{Path, PathBuf};
 
 use crate::cli::ESCAPED_PLACEHOLDER;
 

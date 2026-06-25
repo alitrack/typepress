@@ -138,11 +138,13 @@ mod tests {
 
     #[test]
     fn highlight_rust_code_block() {
-        let mut html = r#"<pre><code class="language-rust">fn main() { println!("hello"); }</code></pre>"#.to_string();
+        let mut html =
+            r#"<pre><code class="language-rust">fn main() { println!("hello"); }</code></pre>"#
+                .to_string();
         let n = highlight_code_blocks(&mut html).unwrap();
         assert_eq!(n, 1);
         assert!(html.contains("println")); // content preserved
-        assert!(html.contains("style="));  // has highlighting
+        assert!(html.contains("style=")); // has highlighting
     }
 
     #[test]
@@ -159,7 +161,10 @@ mod tests {
             let mut html = format!(r#"<pre><code class="language-{}">x = 1</code></pre>"#, lang);
             let n = highlight_code_blocks(&mut html).unwrap();
             assert_eq!(n, 1, "Failed for lang: {}", lang);
-            assert!(!html.contains("class=\"language-"), "Should replace code block");
+            assert!(
+                !html.contains("class=\"language-"),
+                "Should replace code block"
+            );
         }
     }
 

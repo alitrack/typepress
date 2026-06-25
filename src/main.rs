@@ -5,12 +5,11 @@
 //   - --header / --footer CLI shortcuts (CSS GCPM running elements)
 //   - --math auto-detection (katex-rs rendering + KaTeX font loading)
 //   - CJK font handling with automatic subsetting
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
 use fulgur::asset::AssetBundle;
-use fulgur::config::{Margin, PageSize};
+
 use fulgur::engine::Engine;
-use regex::Regex;
 use std::path::{Path, PathBuf};
 mod config;
 mod fonts;
@@ -20,9 +19,8 @@ use typepress::{inject_header_footer, markdown_to_html};
 mod cli;
 mod math;
 
-use cli::ESCAPED_PLACEHOLDER;
-use cli::{Cli, read_input, parse_page_size, page_size_mm, parse_margin};
-use math::{process_math, render_math_markup, math_fallback_markup, escape_html};
+use cli::{Cli, page_size_mm, parse_margin, parse_page_size, read_input};
+use math::process_math;
 
 #[cfg(feature = "mermaid-render")]
 fn detect_mermaid_system_font(prefer_cjk: bool) -> Option<(PathBuf, &'static str)> {
@@ -73,7 +71,9 @@ fn detect_mermaid_system_font(prefer_cjk: bool) -> Option<(PathBuf, &'static str
 
 #[cfg(feature = "mermaid-render")]
 fn process_mermaid(html: &mut String) -> Result<usize> {
+    use math::escape_html;
     use mermaid_render::{EstimatedMeasure, render_diagram};
+    use regex::Regex;
 
     let re = Regex::new(r"(?s)```mermaid\r?\n(.*?)```")?;
     let mut count = 0usize;
@@ -751,8 +751,8 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod preprocess_tests {
     use super::*;
-    use crate::math::render_math_markup;
     use crate::math::process_math;
+    use crate::math::render_math_markup;
 
     #[test]
     fn render_math_markup_preserves_structured_layout() {
