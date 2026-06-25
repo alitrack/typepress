@@ -6,21 +6,26 @@
 // We auto-download the COLRv1 version from jsDelivr CDN on first use
 // (MIT licensed, same as Google's noto-emoji repo).
 //
-// Cache: ~/.cache/typepress/fonts/NotoColorEmoji-COLR.ttf
+// No font renaming is needed: the system Noto Color Emoji font is
+// CBDT bitmap which Krilla rejects, so the AssetBundle COLRv1 version
+// (loaded under the same family name) is the only usable match.
+//
+// Cache: ~/.cache/typepress/fonts/Noto-COLRv1.ttf
 
 use std::path::PathBuf;
 use std::time::Duration;
 
 const COLR_FONT_URL: &str =
     "https://cdn.jsdelivr.net/gh/googlefonts/noto-emoji@main/fonts/Noto-COLRv1.ttf";
-const COLR_FONT_FILENAME: &str = "NotoColorEmoji-COLR.ttf";
+const COLR_FONT_FILENAME: &str = "Noto-COLRv1.ttf";
 
 /// CSS to inject when COLR font is loaded. Puts the COLR font into the
 /// font-family stack right after CJK, before system fallback fonts.
-/// blitz-html does not support @font-face unicode-range, so we use a
-/// direct font-family override on the root element.
+/// The font keeps its original family name "Noto Color Emoji" — we
+/// don't rename it because Krilla rejects the system CBDT version
+/// anyway, so the AssetBundle COLRv1 font is the only usable match.
 pub fn colr_font_face_css() -> &'static str {
-    "* { font-family: 'Noto Sans SC', 'Noto Color Emoji COLR', sans-serif !important; }"
+    "* { font-family: 'Noto Sans SC', 'Noto Color Emoji', sans-serif !important; }"
 }
 
 /// Check if HTML contains emoji characters that need COLR rendering.
@@ -38,7 +43,7 @@ fn is_emoji_char(c: char) -> bool {
 }
 
 /// Ensure COLRv1 emoji font is available locally.
-/// Downloads and renames on first use; reuses cached copy thereafter.
+/// Downloads on first use; reuses cached copy thereafter.
 pub fn ensure_colr_emoji_font() -> Option<PathBuf> {
     let cache_dir = dirs_font_cache();
     let colr_path = cache_dir.join(COLR_FONT_FILENAME);
@@ -47,7 +52,7 @@ pub fn ensure_colr_emoji_font() -> Option<PathBuf> {
         return Some(colr_path);
     }
 
-    // Download and rename
+    // Download (no renaming needed — COLRv1 format is the only one Krilla can use)
     match download_colr_font(&colr_path) {
         Ok(()) => {
             eprintln!("Emoji: COLRv1 font ready ({})", colr_path.display());
@@ -73,7 +78,6 @@ fn download_colr_font(dest: &PathBuf) -> Result<(), String> {
     let parent = dest.parent().ok_or("no parent dir")?;
     std::fs::create_dir_all(parent).map_err(|e| format!("mkdir: {e}"))?;
 
-    // Download with timeout
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
@@ -88,64 +92,8 @@ fn download_colr_font(dest: &PathBuf) -> Result<(), String> {
         return Err(format!("font too small: {} bytes", bytes.len()));
     }
 
-    let tmp = dest.with_extension("tmp");
-    std::fs::write(&tmp, &bytes).map_err(|e| format!("write: {e}"))?;
-
-    // Rename font family to avoid conflict with system CBDT "Noto Color Emoji"
-    rename_colr_font_family(&tmp, "Noto Color Emoji COLR")?;
-    std::fs::rename(&tmp, dest).map_err(|e| format!("rename: {e}"))?;
-
+    std::fs::write(dest, &bytes).map_err(|e| format!("write: {e}"))?;
     Ok(())
-}
-
-#[cfg(not(test))]
-fn rename_colr_font_family(path: &std::path::Path, new_family: &str) -> Result<(), String> {
-    use std::process::{Command, Stdio};
-
-    let script = r#"
-from fontTools.ttLib import TTFont
-import sys
-tt = TTFont(sys.argv[1])
-for rec in tt['name'].names:
-    if rec.nameID in [1, 16, 4, 6]:
-        if rec.nameID in [4, 6]:
-            rec.string = sys.argv[2]
-        else:
-            rec.string = sys.argv[2]
-tt.save(sys.argv[1])
-"#;
-
-    let mut child = Command::new("python3")
-        .args(["-c", script, &path.to_string_lossy(), new_family])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("python3: {e}"))?;
-
-    // 10-minute timeout for font subsetting; kill if exceeded
-    let (tx, rx) = std::sync::mpsc::channel();
-    let pid = child.id();
-    std::thread::spawn(move || {
-        let _ = tx.send(child.wait());
-    });
-    let output = match rx.recv_timeout(Duration::from_secs(600)) {
-        Ok(Ok(status)) => status,
-        Ok(Err(e)) => return Err(format!("wait: {e}")),
-        Err(_) => {
-            let _ = Command::new("kill").arg(format!("{pid}")).status();
-            return Err("python3 timed out after 600s".to_string());
-        }
-    };
-    if !output.success() {
-        return Err("fontTools rename failed".into());
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-fn rename_colr_font_family(_path: &std::path::Path, _new_family: &str) -> Result<(), String> {
-    Ok(()) // no-op in tests
 }
 
 #[cfg(test)]
