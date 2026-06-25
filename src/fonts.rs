@@ -176,6 +176,104 @@ pub fn scan_font_dir(dir: &Path) -> Vec<PathBuf> {
     fonts
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_single_font_face() {
+        let css = r#"@font-face { font-family: "MyFont"; src: url("myfont.woff2"); }"#;
+        let faces = parse_font_faces(css);
+        assert_eq!(faces.len(), 1);
+        assert_eq!(faces[0].family, "MyFont");
+        assert_eq!(faces[0].src_url, "myfont.woff2");
+    }
+
+    #[test]
+    fn parse_font_face_https_url() {
+        let css = r#"@font-face { font-family: "WebFont"; src: url("https://example.com/font.woff2"); }"#;
+        let faces = parse_font_faces(css);
+        assert_eq!(faces.len(), 1);
+        assert_eq!(faces[0].family, "WebFont");
+        assert!(faces[0].src_url.starts_with("https://"));
+    }
+
+    #[test]
+    fn parse_multiple_font_faces() {
+        let css = r#"
+            @font-face { font-family: "A"; src: url("a.woff2"); }
+            @font-face { font-family: "B"; src: url("b.woff2"); }
+        "#;
+        let faces = parse_font_faces(css);
+        assert_eq!(faces.len(), 2);
+        assert_eq!(faces[0].family, "A");
+        assert_eq!(faces[1].family, "B");
+    }
+
+    #[test]
+    fn parse_empty_css_returns_none() {
+        let faces = parse_font_faces("");
+        assert!(faces.is_empty());
+    }
+
+    #[test]
+    fn parse_no_font_face_returns_empty() {
+        let faces = parse_font_faces("body { color: red; }");
+        assert!(faces.is_empty());
+    }
+
+    #[test]
+    fn parse_missing_src_skipped() {
+        let css = r#"@font-face { font-family: "Bad"; }"#;
+        let faces = parse_font_faces(css);
+        assert!(faces.is_empty());
+    }
+
+    #[test]
+    fn parse_missing_family_skipped() {
+        let css = r#"@font-face { src: url("font.woff2"); }"#;
+        let faces = parse_font_faces(css);
+        assert!(faces.is_empty());
+    }
+
+    #[test]
+    fn extract_from_html_style_block() {
+        let html = r#"<html><head><style>@font-face { font-family: "F"; src: url("f.woff2"); }</style></head></html>"#;
+        let faces = extract_font_faces_from_html(html);
+        assert_eq!(faces.len(), 1);
+        assert_eq!(faces[0].family, "F");
+    }
+
+    #[test]
+    fn extract_from_html_no_style_returns_empty() {
+        let html = "<html><body>No fonts here</body></html>";
+        let faces = extract_font_faces_from_html(html);
+        assert!(faces.is_empty());
+    }
+
+    #[test]
+    fn system_font_paths_not_empty() {
+        let paths = system_font_paths();
+        // At least one system font path should exist on any platform
+        assert!(!paths.is_empty());
+    }
+
+    #[test]
+    fn scan_font_dir_finds_fonts() {
+        use std::fs;
+        let dir = std::env::temp_dir().join("_typepress_font_test");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("test.ttf"), b"dummy").unwrap();
+        fs::write(dir.join("test.otf"), b"dummy").unwrap();
+        fs::write(dir.join("not_a_font.txt"), b"dummy").unwrap();
+
+        let fonts = scan_font_dir(&dir);
+        assert!(fonts.len() >= 2, "Expected at least 2 fonts, found {}", fonts.len());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+}
+
 /// Discover system font directories for automatic CJK and general font discovery.
 /// Returns a list of paths to scan — caller should call scan_font_dir on each.
 #[allow(dead_code)]

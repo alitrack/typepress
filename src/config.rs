@@ -156,3 +156,62 @@ impl TypePressConfig {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_minimal_config() {
+        let yaml = "input: doc.md\n";
+        let config: TypePressConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.input.unwrap().to_str().unwrap(), "doc.md");
+        assert!(config.from.is_none());
+    }
+
+    #[test]
+    fn load_full_config() {
+        let yaml = r#"
+input: report.html
+from: html
+output:
+  pdf: report.pdf
+page:
+  size: A4
+  landscape: true
+  margin: 20mm
+fonts:
+  - /usr/share/fonts/NotoSans.ttf
+header: "Chapter 1"
+math:
+  enabled: true
+  font_dir: /usr/share/fonts/katex
+"#;
+        let config: TypePressConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.input.unwrap().to_str().unwrap(), "report.html");
+        assert_eq!(config.from.unwrap(), "html");
+        assert_eq!(config.output.unwrap().pdf.unwrap().to_str().unwrap(), "report.pdf");
+        let page = config.page.unwrap();
+        assert_eq!(page.size.unwrap(), "A4");
+        assert!(page.landscape.unwrap());
+        assert_eq!(config.fonts.len(), 1);
+        assert_eq!(config.header.unwrap(), "Chapter 1");
+    }
+
+    #[test]
+    fn math_config_defaults() {
+        let mc = MathConfig::default();
+        assert!(mc.enabled);
+        assert!(mc.font_dir.is_none());
+    }
+
+    #[test]
+    fn empty_config_all_none() {
+        let config = TypePressConfig::default();
+        assert!(config.input.is_none());
+        assert!(config.from.is_none());
+        assert!(config.output.is_none());
+        assert!(config.page.is_none());
+        assert!(config.fonts.is_empty());
+    }
+}

@@ -131,3 +131,67 @@ fn html_decode(s: &str) -> String {
         .replace("&quot;", "\"")
         .replace("&#39;", "'")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn highlight_rust_code_block() {
+        let mut html = r#"<pre><code class="language-rust">fn main() { println!("hello"); }</code></pre>"#.to_string();
+        let n = highlight_code_blocks(&mut html).unwrap();
+        assert_eq!(n, 1);
+        assert!(html.contains("println")); // content preserved
+        assert!(html.contains("style="));  // has highlighting
+    }
+
+    #[test]
+    fn highlight_unknown_language_fallback() {
+        let mut html = r#"<pre><code class="language-zzz">some code</code></pre>"#.to_string();
+        let n = highlight_code_blocks(&mut html).unwrap();
+        assert_eq!(n, 1);
+        assert!(html.contains("<pre><code>some code</code></pre>"));
+    }
+
+    #[test]
+    fn highlight_preserves_language_aliases() {
+        for lang in &["rs", "py", "js", "ts", "go", "sh", "sql", "yaml", "toml"] {
+            let mut html = format!(r#"<pre><code class="language-{}">x = 1</code></pre>"#, lang);
+            let n = highlight_code_blocks(&mut html).unwrap();
+            assert_eq!(n, 1, "Failed for lang: {}", lang);
+            assert!(!html.contains("class=\"language-"), "Should replace code block");
+        }
+    }
+
+    #[test]
+    fn highlight_no_code_blocks() {
+        let mut html = "<p>No code here</p>".to_string();
+        let n = highlight_code_blocks(&mut html).unwrap();
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn html_escape_roundtrip() {
+        let original = "<script>alert('xss')</script>";
+        let escaped = html_escape(original);
+        assert!(!escaped.contains('<'));
+        let decoded = html_decode(&escaped);
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn find_syntax_known_languages() {
+        let ss = SyntaxSet::load_defaults_newlines();
+        assert!(find_syntax(&ss, "rust").is_some());
+        assert!(find_syntax(&ss, "rs").is_some());
+        assert!(find_syntax(&ss, "python").is_some());
+        assert!(find_syntax(&ss, "py").is_some());
+        assert!(find_syntax(&ss, "javascript").is_some());
+    }
+
+    #[test]
+    fn find_syntax_unknown_returns_none() {
+        let ss = SyntaxSet::load_defaults_newlines();
+        assert!(find_syntax(&ss, "zzz").is_none());
+    }
+}
