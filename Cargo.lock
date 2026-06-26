@@ -3932,10 +3932,12 @@ dependencies = [
  "pulldown-cmark",
  "regex",
  "reqwest",
+ "resvg",
  "serde",
  "serde_yaml",
  "syntect",
  "tempfile",
+ "tiny-skia",
 ]
 
 [[package]]

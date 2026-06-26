@@ -8,6 +8,15 @@
 use anyhow::Result;
 use clap::Parser;
 use fulgur::asset::AssetBundle;
+use std::cell::RefCell;
+
+#[cfg(feature = "mermaid-render")]
+type MermaidImage = (String, Vec<u8>);
+
+#[cfg(feature = "mermaid-render")]
+thread_local! {
+    static MERMAID_IMAGES: RefCell<Option<Vec<MermaidImage>>> = const { RefCell::new(None) };
+}
 
 use fulgur::engine::Engine;
 use std::path::{Path, PathBuf};
@@ -70,7 +79,7 @@ fn detect_mermaid_system_font(prefer_cjk: bool) -> Option<(PathBuf, &'static str
 }
 
 #[cfg(feature = "mermaid-render")]
-fn process_mermaid(html: &mut String) -> Result<usize> {
+fn process_mermaid(html: &mut String, images: &mut Vec<(String, Vec<u8>)>) -> Result<usize> {
     use math::escape_html;
     use mermaid_render::{EstimatedMeasure, render_diagram};
     use regex::Regex;
@@ -89,8 +98,17 @@ fn process_mermaid(html: &mut String) -> Result<usize> {
         .collect();
 
     for (range, source) in matches.into_iter().rev() {
-        let mermaid_font = detect_mermaid_system_font(source.chars().any(|c| !c.is_ascii()));
-        let mut style = mermaid_render::DiagramStyle::default();
+        let mermaid_font = detect_mermaid_system_font(!source.is_ascii());
+        let mut style = mermaid_render::DiagramStyle {
+            node_fill: "#eff6ff".into(),
+            node_stroke: "#3b82f6".into(),
+            node_text: "#1e293b".into(),
+            edge_stroke: "#64748b".into(),
+            edge_text: "#475569".into(),
+            background: "transparent".into(),
+            font_family: "sans-serif".into(),
+            font_size: 13.0,
+        };
         if let Some((_, family)) = mermaid_font.as_ref() {
             style.font_family = (*family).to_string();
         }
@@ -99,10 +117,23 @@ fn process_mermaid(html: &mut String) -> Result<usize> {
             Ok((svg, w, h)) => {
                 let svg_w = w.max(100.0);
                 let svg_h = h.max(100.0);
-                let svg_doc = format!(
-                    r#"<div class="txp-mermaid" style="text-align:center;margin:1em 0"><svg xmlns="http://www.w3.org/2000/svg" width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}" style="display:block;margin:0 auto">{svg}</svg></div>"#
-                );
-                html.replace_range(range, &svg_doc);
+                // Rasterize SVG to PNG, register in AssetBundle
+                match svg_to_png_bytes(&svg, svg_w, svg_h, count) {
+                    Ok((name, data)) => {
+                        let png_tag = format!(
+                            r#"<div class="txp-mermaid" style="text-align:center;margin:1em 0"><img src="{name}" width="{svg_w:.0}" height="{svg_h:.0}" style="display:block;margin:0 auto" alt="mermaid diagram" /></div>"#
+                        );
+                        html.replace_range(range, &png_tag);
+                        images.push((name, data));
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: mermaid rasterize failed: {e}");
+                        let svg_fallback = format!(
+                            r#"<div class="txp-mermaid" style="text-align:center;margin:1em 0"><svg xmlns="http://www.w3.org/2000/svg" width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}" style="display:block;margin:0 auto">{svg}</svg></div>"#
+                        );
+                        html.replace_range(range, &svg_fallback);
+                    }
+                }
                 count += 1;
             }
             Err(e) => {
@@ -117,6 +148,31 @@ fn process_mermaid(html: &mut String) -> Result<usize> {
     }
 
     Ok(count)
+}
+
+/// Rasterize SVG fragment to PNG bytes for AssetBundle registration.
+#[cfg(feature = "mermaid-render")]
+fn svg_to_png_bytes(svg_fragment: &str, w: f32, h: f32, index: usize) -> Result<(String, Vec<u8>)> {
+    use resvg::usvg;
+    use tiny_skia::Pixmap;
+
+    let svg_doc = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">{svg_fragment}</svg>"#
+    );
+    let opts = usvg::Options::default();
+    let tree = usvg::Tree::from_str(&svg_doc, &opts)?;
+    let scale = 2.0;
+    let pixmap_w = (w * scale).ceil() as u32;
+    let pixmap_h = (h * scale).ceil() as u32;
+    let mut pixmap = Pixmap::new(pixmap_w, pixmap_h)
+        .ok_or_else(|| anyhow::anyhow!("failed to create pixmap {pixmap_w}x{pixmap_h}"))?;
+    resvg::render(
+        &tree,
+        tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    let name = format!("txp-mermaid-{index}.png");
+    Ok((name, pixmap.encode_png()?))
 }
 
 fn detect_math_system_font() -> Option<(PathBuf, String)> {
@@ -356,10 +412,16 @@ fn main() -> Result<()> {
 
         // 0a. Mermaid (raw markdown)
         #[cfg(feature = "mermaid-render")]
-        match process_mermaid(&mut html) {
-            Ok(n) if n > 0 => eprintln!("Rendered {n} mermaid diagram(s)"),
-            Err(e) => eprintln!("Warning: mermaid processing failed: {e}"),
-            _ => {}
+        {
+            let mut mermaid_images = Vec::new();
+            match process_mermaid(&mut html, &mut mermaid_images) {
+                Ok(n) if n > 0 => eprintln!("Rendered {n} mermaid diagram(s)"),
+                Err(e) => eprintln!("Warning: mermaid processing failed: {e}"),
+                _ => {}
+            }
+            MERMAID_IMAGES.with(|cell| {
+                cell.borrow_mut().replace(mermaid_images);
+            });
         }
 
         // 0b. Math (raw markdown — pre-empts pulldown-cmark's ENABLE_MATH)
@@ -445,10 +507,16 @@ fn main() -> Result<()> {
 
         // 3. Mermaid
         #[cfg(feature = "mermaid-render")]
-        match process_mermaid(&mut html) {
-            Ok(n) if n > 0 => eprintln!("Rendered {n} mermaid diagram(s)"),
-            Err(e) => eprintln!("Warning: mermaid processing failed: {e}"),
-            _ => {}
+        {
+            let mut mermaid_images = Vec::new();
+            match process_mermaid(&mut html, &mut mermaid_images) {
+                Ok(n) if n > 0 => eprintln!("Rendered {n} mermaid diagram(s)"),
+                Err(e) => eprintln!("Warning: mermaid processing failed: {e}"),
+                _ => {}
+            }
+            MERMAID_IMAGES.with(|cell| {
+                cell.borrow_mut().replace(mermaid_images);
+            });
         }
     }
 
@@ -508,11 +576,22 @@ fn main() -> Result<()> {
         }
     }
 
+    let has_mermaid_images = {
+        #[cfg(feature = "mermaid-render")]
+        {
+            MERMAID_IMAGES.with(|cell| cell.borrow().is_some())
+        }
+        #[cfg(not(feature = "mermaid-render"))]
+        {
+            false
+        }
+    };
     let needs_assets = !cli.fonts.is_empty()
         || !cli.css_files.is_empty()
         || header_css.is_some()
         || !math_fonts.is_empty()
-        || !font_face_paths.is_empty();
+        || !font_face_paths.is_empty()
+        || has_mermaid_images;
 
     let assets = if needs_assets {
         let mut bundle = AssetBundle::new();
@@ -538,6 +617,16 @@ fn main() -> Result<()> {
             bundle
                 .add_font_file(f)
                 .unwrap_or_else(|e| eprintln!("Warning: @font-face font {}: {e}", f.display()));
+        }
+        #[cfg(feature = "mermaid-render")]
+        {
+            MERMAID_IMAGES.with(|cell| {
+                if let Some(imgs) = cell.borrow_mut().take() {
+                    for (name, data) in imgs {
+                        bundle.add_image(name, data);
+                    }
+                }
+            });
         }
         Some(bundle)
     } else {
@@ -983,6 +1072,8 @@ fn main() -> Result<()> {
 mod preprocess_tests {
     use crate::math::process_math;
     use crate::math::render_math_markup;
+    #[cfg(feature = "mermaid-render")]
+    use crate::process_mermaid;
 
     #[test]
     fn render_math_markup_preserves_structured_layout() {
@@ -1025,14 +1116,15 @@ mod preprocess_tests {
 
     #[test]
     #[cfg(feature = "mermaid-render")]
-    fn process_mermaid_generates_inline_svg() {
+    #[cfg(feature = "mermaid-render")]
+    fn process_mermaid_generates_image() {
         let mut markdown = String::from("```mermaid\ngraph TD\n  A --> B\n```");
-        let rendered = process_mermaid(&mut markdown).unwrap();
+        let mut images = Vec::new();
+        let rendered = process_mermaid(&mut markdown, &mut images).unwrap();
 
         assert_eq!(rendered, 1);
-        assert!(markdown.contains("<svg"));
-        assert!(markdown.contains("viewBox="));
-        assert!(markdown.contains("A"));
+        assert!(markdown.contains("<img"), "should embed as img");
+        assert!(!images.is_empty(), "should produce PNG bytes");
         assert!(!markdown.contains("mermaid-placeholder"));
     }
 }
