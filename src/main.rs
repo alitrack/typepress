@@ -8,6 +8,7 @@
 use anyhow::Result;
 use clap::Parser;
 use fulgur::asset::AssetBundle;
+#[cfg(feature = "mermaid-render")]
 use std::cell::RefCell;
 
 #[cfg(feature = "mermaid-render")]
@@ -99,12 +100,24 @@ fn process_mermaid(html: &mut String, images: &mut Vec<(String, Vec<u8>)>) -> Re
 
     for (range, source) in matches.into_iter().rev() {
         let mermaid_font = detect_mermaid_system_font(!source.is_ascii());
+        // Color themes: (node_fill, node_stroke, node_text, edge_stroke, edge_text)
+        const THEMES: &[(&str, &str, &str, &str, &str)] = &[
+            ("#eff6ff", "#3b82f6", "#1e293b", "#64748b", "#475569"), // Blue
+            ("#ecfdf5", "#10b981", "#064e3b", "#64748b", "#475569"), // Emerald
+            ("#fffbeb", "#f59e0b", "#78350f", "#64748b", "#475569"), // Amber
+            ("#fff1f2", "#f43f5e", "#881337", "#64748b", "#475569"), // Rose
+            ("#f5f3ff", "#8b5cf6", "#3b0764", "#64748b", "#475569"), // Violet
+            ("#ecfeff", "#06b6d4", "#164e63", "#64748b", "#475569"), // Cyan
+            ("#fff7ed", "#f97316", "#7c2d12", "#64748b", "#475569"), // Orange
+            ("#f0fdfa", "#14b8a6", "#134e4a", "#64748b", "#475569"), // Teal
+        ];
+        let theme = THEMES[count % THEMES.len()];
         let mut style = mermaid_render::DiagramStyle {
-            node_fill: "#eff6ff".into(),
-            node_stroke: "#3b82f6".into(),
-            node_text: "#1e293b".into(),
-            edge_stroke: "#64748b".into(),
-            edge_text: "#475569".into(),
+            node_fill: theme.0.into(),
+            node_stroke: theme.1.into(),
+            node_text: theme.2.into(),
+            edge_stroke: theme.3.into(),
+            edge_text: theme.4.into(),
             background: "transparent".into(),
             font_family: "sans-serif".into(),
             font_size: 13.0,
