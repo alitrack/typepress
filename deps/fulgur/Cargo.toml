@@ -33,3 +33,6 @@ serde = { version = "1", features = ["derive"] }
 [lib]
 name = "fulgur"
 path = "src/lib.rs"
+
+[patch.crates-io]
+blitz-dom = { path = "vendor/blitz-dom" }

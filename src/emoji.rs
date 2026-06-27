@@ -19,15 +19,6 @@ const COLR_FONT_URL: &str =
     "https://cdn.jsdelivr.net/gh/googlefonts/noto-emoji@main/fonts/Noto-COLRv1.ttf";
 const COLR_FONT_FILENAME: &str = "Noto-COLRv1.ttf";
 
-/// CSS to inject when COLR font is loaded. Puts the COLR font into the
-/// font-family stack right after CJK, before system fallback fonts.
-/// The font keeps its original family name "Noto Color Emoji" — we
-/// don't rename it because Krilla rejects the system CBDT version
-/// anyway, so the AssetBundle COLRv1 font is the only usable match.
-pub fn colr_font_face_css() -> &'static str {
-    "* { font-family: 'Noto Sans SC', 'Noto Color Emoji', sans-serif !important; }"
-}
-
 /// Check if HTML contains emoji characters that need COLR rendering.
 pub fn has_emoji(html: &str) -> bool {
     html.chars().any(is_emoji_char)

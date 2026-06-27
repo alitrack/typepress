@@ -564,10 +564,6 @@ fn main() -> Result<()> {
         if let Some(colr_path) = typepress::emoji::ensure_colr_emoji_font() {
             if !font_face_paths.iter().any(|p| p == &colr_path) {
                 font_face_paths.push(colr_path);
-                // Inject CSS @font-face to force parley to use COLR font
-                // for emoji codepoints (otherwise Unifont/CJK fonts take priority)
-                let css = typepress::emoji::colr_font_face_css();
-                inject_css(&mut html, css);
             }
         }
     }
