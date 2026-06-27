@@ -117,11 +117,10 @@ fn process_mermaid(html: &mut String, images: &mut Vec<(String, Vec<u8>)>) -> Re
             Ok((svg, w, h)) => {
                 let svg_w = w.max(100.0);
                 let svg_h = h.max(100.0);
-                // Rasterize SVG to PNG, register in AssetBundle
                 match svg_to_png_bytes(&svg, svg_w, svg_h, count) {
                     Ok((name, data)) => {
                         let png_tag = format!(
-                            r#"<div class="txp-mermaid" style="text-align:center;margin:1em 0"><img src="{name}" width="{svg_w:.0}" height="{svg_h:.0}" style="display:block;margin:0 auto" alt="mermaid diagram" /></div>"#
+                            r#"<img src="{name}" style="display:block;margin:1em auto;width:{svg_w:.0}px;height:{svg_h:.0}px" alt="mermaid diagram" />"#
                         );
                         html.replace_range(range, &png_tag);
                         images.push((name, data));
@@ -159,7 +158,14 @@ fn svg_to_png_bytes(svg_fragment: &str, w: f32, h: f32, index: usize) -> Result<
     let svg_doc = format!(
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">{svg_fragment}</svg>"#
     );
-    let opts = usvg::Options::default();
+    let mut opts = usvg::Options::default();
+    // Load system fonts so resvg can render text in the SVG
+    // fontdb is behind Arc, use make_mut to get mutable access
+    let fontdb = std::sync::Arc::make_mut(&mut opts.fontdb);
+    fontdb.load_system_fonts();
+    for dir in &["/usr/share/fonts", "/usr/local/share/fonts"] {
+        fontdb.load_fonts_dir(dir);
+    }
     let tree = usvg::Tree::from_str(&svg_doc, &opts)?;
     let scale = 2.0;
     let pixmap_w = (w * scale).ceil() as u32;
