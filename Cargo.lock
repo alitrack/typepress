@@ -2000,9 +2000,9 @@ checksum = "38d1115007560874e373613744c6fba374c17688327a71c1476d1a5954cc857b"
 
 [[package]]
 name = "mermaid-render"
-version = "0.4.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf3b175b065b8eb933bdd33d86b6946253c7aca42e4ac5090a6a60a238460780"
+checksum = "1ef9172e62429275d2d368889741e2195884cf8ea5020afc4f4fe529e175f68e"
 dependencies = [
  "dagre",
 ]
