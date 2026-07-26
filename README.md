@@ -12,7 +12,7 @@ TypePress renders HTML and Markdown to PDF using fulgur (Blitz → Taffy → Kri
 - **HTML/CSS → PDF** — Full HTML rendering with CSS styling
 - **Markdown → PDF** — GFM extensions, code highlighting via syntect
 - **LaTeX Math** — `$...$` and `$$...$$` rendered via katex-rs
-- **Mermaid Diagrams** — Flowchart, sequence, class, state, ER diagrams
+- **Mermaid Diagrams** — 10+ diagram types via [mermaid-render](https://crates.io/crates/mermaid-render): flowchart, sequence (autonumber, loops), class (generics), state, ER, gantt, pie, timeline, mindmap, gitGraph — all pure Rust, zero JS
 - **CJK Support** — Chinese/Japanese/Korean with automatic font subsetting
 - **Single Binary** — ~15MB, zero dependencies, no Chromium/Node.js
 - **CSS Grid/Flexbox → Table** — Automatic layout degradation for taffy compatibility
