@@ -131,7 +131,7 @@ fn process_mermaid(html: &mut String, images: &mut Vec<(String, Vec<u8>)>) -> Re
                 let mut svg_w = w.max(100.0);
                 let mut svg_h = h.max(100.0);
                 // Constrain diagram width to A4 content area (~700px at 96dpi)
-                const MAX_W: f32 = 700.0;
+                const MAX_W: f32 = 500.0;
                 if svg_w > MAX_W {
                     let scale = MAX_W / svg_w;
                     svg_w = MAX_W;
@@ -140,7 +140,7 @@ fn process_mermaid(html: &mut String, images: &mut Vec<(String, Vec<u8>)>) -> Re
                 match svg_to_png_bytes(&svg, svg_w, svg_h, count) {
                     Ok((name, data)) => {
                         let png_tag = format!(
-                            r#"<img src="{name}" style="display:block;margin:1em auto;width:{svg_w:.0}px;height:{svg_h:.0}px" alt="mermaid diagram" />"#
+                            r#"<img src="{name}" width="{svg_w:.0}" height="{svg_h:.0}" style="display:block;margin:1em auto;width:{svg_w:.0}px;height:{svg_h:.0}px" alt="mermaid diagram" />"#
                         );
                         html.replace_range(range, &png_tag);
                         images.push((name, data));
@@ -148,7 +148,7 @@ fn process_mermaid(html: &mut String, images: &mut Vec<(String, Vec<u8>)>) -> Re
                     Err(e) => {
                         eprintln!("Warning: mermaid rasterize failed: {e}");
                         let svg_fallback = format!(
-                            r#"<div class="txp-mermaid" style="text-align:center;margin:1em 0"><svg xmlns="http://www.w3.org/2000/svg" width="{svg_w:.0}" height="{svg_h:.0}" viewBox="0 0 {w:.0} {h:.0}" style="display:block;margin:0 auto;width:{svg_w:.0}px;height:{svg_h:.0}px">{svg}</svg></div>"#
+                            r#"<div class="txp-mermaid" style="text-align:center;margin:1em 0;width:{svg_w:.0}px;height:{svg_h:.0}px"><svg xmlns="http://www.w3.org/2000/svg" width="{svg_w:.0}" height="{svg_h:.0}" viewBox="0 0 {w:.0} {h:.0}" style="display:block;margin:0 auto">{svg}</svg></div>"#
                         );
                         html.replace_range(range, &svg_fallback);
                     }
@@ -636,7 +636,7 @@ fn main() -> Result<()> {
         || header_css.is_some()
         || !math_fonts.is_empty()
         || !font_face_paths.is_empty()
-        || !mermaid_images.is_empty();
+        || !mermaid_images.is_empty()
         || !cli.images.is_empty();
 
     let assets = if needs_assets {
@@ -666,7 +666,6 @@ fn main() -> Result<()> {
         }
         #[cfg(feature = "mermaid-render")]
         {
-            eprintln!("DEBUG: adding {} mermaid images to bundle", mermaid_images.len());
             for (name, data) in mermaid_images.drain(..) {
                 bundle.add_image(name, data);
             }
