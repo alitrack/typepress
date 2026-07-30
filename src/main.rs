@@ -128,12 +128,19 @@ fn process_mermaid(html: &mut String, images: &mut Vec<(String, Vec<u8>)>) -> Re
 
         match render_diagram(&source, &style, &mut EstimatedMeasure) {
             Ok((svg, w, h)) => {
-                let svg_w = w.max(100.0);
-                let svg_h = h.max(100.0);
+                let mut svg_w = w.max(100.0);
+                let mut svg_h = h.max(100.0);
+                // Constrain diagram width to A4 content area (~700px at 96dpi)
+                const MAX_W: f32 = 700.0;
+                if svg_w > MAX_W {
+                    let scale = MAX_W / svg_w;
+                    svg_w = MAX_W;
+                    svg_h = (svg_h * scale).max(100.0);
+                }
                 match svg_to_png_bytes(&svg, svg_w, svg_h, count) {
                     Ok((name, data)) => {
                         let png_tag = format!(
-                            r#"<img src="{name}" width="{svg_w:.0}" height="{svg_h:.0}" style="display:block;margin:1em auto;max-width:100%;height:auto" alt="mermaid diagram" />"#
+                            r#"<img src="{name}" style="display:block;margin:1em auto;width:{svg_w:.0}px;height:{svg_h:.0}px" alt="mermaid diagram" />"#
                         );
                         html.replace_range(range, &png_tag);
                         images.push((name, data));
@@ -141,7 +148,7 @@ fn process_mermaid(html: &mut String, images: &mut Vec<(String, Vec<u8>)>) -> Re
                     Err(e) => {
                         eprintln!("Warning: mermaid rasterize failed: {e}");
                         let svg_fallback = format!(
-                            r#"<div class="txp-mermaid" style="text-align:center;margin:1em 0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {svg_w} {svg_h}" style="display:block;margin:0 auto;max-width:100%;height:auto">{svg}</svg></div>"#
+                            r#"<div class="txp-mermaid" style="text-align:center;margin:1em 0"><svg xmlns="http://www.w3.org/2000/svg" width="{svg_w:.0}" height="{svg_h:.0}" viewBox="0 0 {w:.0} {h:.0}" style="display:block;margin:0 auto;width:{svg_w:.0}px;height:{svg_h:.0}px">{svg}</svg></div>"#
                         );
                         html.replace_range(range, &svg_fallback);
                     }
@@ -192,6 +199,30 @@ fn svg_to_png_bytes(svg_fragment: &str, w: f32, h: f32, index: usize) -> Result<
     );
     let name = format!("txp-mermaid-{index}.png");
     Ok((name, pixmap.encode_png()?))
+}
+
+/// Merge multiple PNG byte buffers into a single vertical composite PNG.
+/// Returns the composite as PNG bytes.
+fn merge_pngs_vertical(images: &[(String, Vec<u8>)], gap: u32) -> Result<Vec<u8>> {
+    use tiny_skia::Pixmap;
+    let mut decoded: Vec<Pixmap> = Vec::new();
+    for (_name, data) in images {
+        let p = Pixmap::decode_png(data)?;
+        decoded.push(p);
+    }
+    let total_w = decoded.iter().map(|p| p.width()).max().unwrap_or(0);
+    let gap_h = if decoded.len() > 1 { gap * (decoded.len() as u32 - 1) } else { 0 };
+    let total_h: u32 = decoded.iter().map(|p| p.height()).sum::<u32>() + gap_h;
+    let mut composite = Pixmap::new(total_w, total_h)
+        .ok_or_else(|| anyhow::anyhow!("merge_pngs_vertical: pixmap {total_w}x{total_h}"))?;
+    composite.fill(tiny_skia::Color::WHITE);
+    let mut y: u32 = 0;
+    for pix in &decoded {
+        composite.draw_pixmap(0, y as i32, pix.as_ref(), &tiny_skia::PixmapPaint::default(),
+            tiny_skia::Transform::identity(), None);
+        y += pix.height() + gap;
+    }
+    Ok(composite.encode_png()?)
 }
 
 fn detect_math_system_font() -> Option<(PathBuf, String)> {
@@ -426,21 +457,22 @@ fn main() -> Result<()> {
 
     let header_css;
 
+    #[cfg(feature = "mermaid-render")]
+    let mut mermaid_images: Vec<(String, Vec<u8>)> = Vec::new();
+
     if is_md {
         // MD pipeline: Mermaid → Math → Markdown→HTML → Header/Footer → Highlight
 
         // 0a. Mermaid (raw markdown)
         #[cfg(feature = "mermaid-render")]
         {
-            let mut mermaid_images = Vec::new();
-            match process_mermaid(&mut html, &mut mermaid_images) {
+            let mut mermaid_vec = Vec::new();
+            match process_mermaid(&mut html, &mut mermaid_vec) {
                 Ok(n) if n > 0 => eprintln!("Rendered {n} mermaid diagram(s)"),
                 Err(e) => eprintln!("Warning: mermaid processing failed: {e}"),
                 _ => {}
             }
-            MERMAID_IMAGES.with(|cell| {
-                cell.borrow_mut().replace(mermaid_images);
-            });
+            mermaid_images = mermaid_vec;
         }
 
         // 0b. Math (raw markdown — pre-empts pulldown-cmark's ENABLE_MATH)
@@ -527,15 +559,13 @@ fn main() -> Result<()> {
         // 3. Mermaid
         #[cfg(feature = "mermaid-render")]
         {
-            let mut mermaid_images = Vec::new();
-            match process_mermaid(&mut html, &mut mermaid_images) {
+            let mut mermaid_vec = Vec::new();
+            match process_mermaid(&mut html, &mut mermaid_vec) {
                 Ok(n) if n > 0 => eprintln!("Rendered {n} mermaid diagram(s)"),
                 Err(e) => eprintln!("Warning: mermaid processing failed: {e}"),
                 _ => {}
             }
-            MERMAID_IMAGES.with(|cell| {
-                cell.borrow_mut().replace(mermaid_images);
-            });
+            mermaid_images = mermaid_vec;
         }
     }
 
@@ -606,7 +636,8 @@ fn main() -> Result<()> {
         || header_css.is_some()
         || !math_fonts.is_empty()
         || !font_face_paths.is_empty()
-        || has_mermaid_images;
+        || !mermaid_images.is_empty();
+        || !cli.images.is_empty();
 
     let assets = if needs_assets {
         let mut bundle = AssetBundle::new();
@@ -635,13 +666,18 @@ fn main() -> Result<()> {
         }
         #[cfg(feature = "mermaid-render")]
         {
-            MERMAID_IMAGES.with(|cell| {
-                if let Some(imgs) = cell.borrow_mut().take() {
-                    for (name, data) in imgs {
-                        bundle.add_image(name, data);
-                    }
-                }
-            });
+            eprintln!("DEBUG: adding {} mermaid images to bundle", mermaid_images.len());
+            for (name, data) in mermaid_images.drain(..) {
+                bundle.add_image(name, data);
+            }
+        }
+        // CLI -i / --image flag images
+        for (name, path) in &cli.images {
+            if let Ok(data) = std::fs::read(path) {
+                bundle.add_image(name, data);
+            } else {
+                eprintln!("Warning: cannot read image {} ({}): file not found", name, path.display());
+            }
         }
         Some(bundle)
     } else {
