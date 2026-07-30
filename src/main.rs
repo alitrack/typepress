@@ -130,8 +130,8 @@ fn process_mermaid(html: &mut String, images: &mut Vec<(String, Vec<u8>)>) -> Re
             Ok((svg, w, h)) => {
                 let mut svg_w = w.max(100.0);
                 let mut svg_h = h.max(100.0);
-                // Constrain diagram width to A4 content area (~700px at 96dpi)
-                const MAX_W: f32 = 500.0;
+                // Constrain to fit A4 page content area (≈700px at 96dpi)
+                const MAX_W: f32 = 700.0;
                 if svg_w > MAX_W {
                     let scale = MAX_W / svg_w;
                     svg_w = MAX_W;

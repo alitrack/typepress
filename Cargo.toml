@@ -8,7 +8,7 @@ repository = "https://github.com/alitrack/typepress"
 
 [dependencies]
 # Core engine: fulgur provides HTML→PDF pipeline (Blitz→Taffy→Krilla)
-fulgur = "0.18"
+fulgur = "0.39"
 # CLI
 clap = { version = "4", features = ["derive"] }
 # LaTeX math rendering (pure Rust KaTeX)
@@ -44,9 +44,6 @@ mermaid-render = ["dep:mermaid-render", "dep:resvg", "dep:tiny-skia"]
 lto = true
 strip = true
 opt-level = 3
-
-[patch.crates-io]
-fulgur = { path = "deps/fulgur" }
 
 [dev-dependencies]
 assert_cmd = "2"

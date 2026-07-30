@@ -183,11 +183,15 @@ fn convert_image(
 
     let (content_w, content_h, opacity, visible) =
         maybe_insert_block_for_replaced(node, assets, out);
+    // When Blitz can't determine the intrinsic size of bundle-loaded images,
+    // it returns 0 or NaN for height. Fall back to the image's natural size.
+    let w = if content_w > 0.0 { Some(content_w) } else { None };
+    let h = if content_h > 0.0 { Some(content_h) } else { None };
     let entry = make_image_entry(
         data,
         format,
-        Some(content_w),
-        Some(content_h),
+        w,
+        h,
         opacity,
         visible,
     );
