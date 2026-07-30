@@ -74,6 +74,9 @@ pub struct Cli {
     pub fonts: Vec<PathBuf>,
     #[arg(long = "css", alias = "user-style-sheet")]
     pub css_files: Vec<PathBuf>,
+    /// Bundle image files as name=path (repeatable). Example: -i logo.png=assets/logo.png
+    #[arg(long = "image", short = 'i', value_parser = parse_image_bundle)]
+    pub images: Vec<(String, PathBuf)>,
     // Headers & Footers
     #[arg(long = "header", alias = "header-html")]
     pub header: Option<String>,
@@ -275,6 +278,12 @@ pub fn parse_length_mm(s: &str) -> std::result::Result<f32, &'static str> {
 }
 
 pub(crate) const ESCAPED_PLACEHOLDER: &str = "\x00TXP_ESC_DOLLAR\x00";
+
+/// Parse `name=path` pairs for the `--image` / `-i` flag.
+fn parse_image_bundle(s: &str) -> Result<(String, PathBuf), String> {
+    let (name, path) = s.split_once('=').ok_or("expected name=path")?;
+    Ok((name.trim().to_string(), PathBuf::from(path.trim())))
+}
 
 pub fn read_input(input: Option<&PathBuf>, stdin: bool) -> Result<String> {
     if stdin {
