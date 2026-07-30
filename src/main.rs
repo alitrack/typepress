@@ -133,7 +133,7 @@ fn process_mermaid(html: &mut String, images: &mut Vec<(String, Vec<u8>)>) -> Re
                 match svg_to_png_bytes(&svg, svg_w, svg_h, count) {
                     Ok((name, data)) => {
                         let png_tag = format!(
-                            r#"<img src="{name}" style="display:block;margin:1em auto;width:{svg_w:.0}px;height:{svg_h:.0}px" alt="mermaid diagram" />"#
+                            r#"<img src="{name}" width="{svg_w:.0}" height="{svg_h:.0}" style="display:block;margin:1em auto;max-width:100%;height:auto" alt="mermaid diagram" />"#
                         );
                         html.replace_range(range, &png_tag);
                         images.push((name, data));
@@ -141,7 +141,7 @@ fn process_mermaid(html: &mut String, images: &mut Vec<(String, Vec<u8>)>) -> Re
                     Err(e) => {
                         eprintln!("Warning: mermaid rasterize failed: {e}");
                         let svg_fallback = format!(
-                            r#"<div class="txp-mermaid" style="text-align:center;margin:1em 0"><svg xmlns="http://www.w3.org/2000/svg" width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}" style="display:block;margin:0 auto">{svg}</svg></div>"#
+                            r#"<div class="txp-mermaid" style="text-align:center;margin:1em 0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {svg_w} {svg_h}" style="display:block;margin:0 auto;max-width:100%;height:auto">{svg}</svg></div>"#
                         );
                         html.replace_range(range, &svg_fallback);
                     }
