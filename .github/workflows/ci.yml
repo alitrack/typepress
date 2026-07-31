@@ -48,3 +48,25 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y libfontconfig-dev fonts-noto-cjk
       - uses: Swatinem/rust-cache@v2
       - run: cargo test
+
+  smoke:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y libfontconfig-dev fonts-noto-cjk
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --features mermaid-render
+      - name: Smoke test — md → PDF with --json
+        run: |
+          echo '# Hello 世界' > /tmp/test.md
+          CJK_FONT=$(find /usr/share/fonts -name "NotoSansCJK*" -o -name "noto*cjk*" 2>/dev/null | head -1)
+          if [ -z "$CJK_FONT" ]; then CJK_FONT=$(find /usr/share/fonts -name "*.ttf" -o -name "*.ttc" 2>/dev/null | head -1); fi
+          ./target/release/typepress /tmp/test.md -f "$CJK_FONT" -o /tmp/out.pdf --json
+          test -f /tmp/out.pdf && echo "OK: PDF generated"
+      - name: Smoke test — verify --strict passes for simple doc
+        run: |
+          echo '# test' > /tmp/test2.md
+          ./target/release/typepress /tmp/test2.md -o /tmp/out2.pdf --strict
+          echo "exit: $?"
