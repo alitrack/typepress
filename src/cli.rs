@@ -103,6 +103,9 @@ pub struct Cli {
     pub pdf_ua: bool,
     #[arg(long = "no-system-fonts")]
     pub no_system_fonts: bool,
+    /// Exit with code 1 if images were scaled or warnings are present
+    #[arg(long)]
+    pub strict: bool,
     /// Output render result as JSON (page count, file size, hash, warnings)
     #[arg(long)]
     pub json: bool,

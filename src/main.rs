@@ -1161,6 +1161,11 @@ fn main() -> Result<()> {
         }
     }
 
+    // --strict: exit code 1 if images were constrained
+    if cli.strict && img_constrained > 0 {
+        std::process::exit(1);
+    }
+
     Ok(())
 }
 
