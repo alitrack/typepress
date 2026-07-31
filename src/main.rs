@@ -576,8 +576,13 @@ fn main() -> Result<()> {
     // Emoji font fallback: register system emoji font for glyphs missing
     // from Noto Serif CJK (👦👧👩🛠 etc). Note: Krilla does not support
     // color bitmap fonts, so color emoji glyphs render as monochrome outlines.
+    // Skip fonts exceeding the asset size limit (e.g. Apple Color Emoji ~192MB).
     if let Some(emoji_path) = detect_emoji_font() {
-        font_face_paths.push(emoji_path);
+        if let Ok(meta) = std::fs::metadata(&emoji_path) {
+            if meta.len() < 64 * 1024 * 1024 {
+                font_face_paths.push(emoji_path);
+            }
+        }
     }
     // COLRv1 emoji font: auto-download for native color emoji rendering
     // (krilla supports COLR via Type3 PDF font embedding since v0.7;
