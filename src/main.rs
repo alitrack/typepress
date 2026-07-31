@@ -263,6 +263,12 @@ fn detect_emoji_font() -> Option<PathBuf> {
     ] {
         let p = std::path::Path::new(path);
         if p.exists() {
+            // Skip fonts that exceed the asset size limit
+            if let Ok(meta) = std::fs::metadata(p) {
+                if meta.len() >= 64 * 1024 * 1024 {
+                    continue;
+                }
+            }
             eprintln!("Emoji font: {}", p.display());
             return Some(p.to_path_buf());
         }
@@ -578,11 +584,7 @@ fn main() -> Result<()> {
     // color bitmap fonts, so color emoji glyphs render as monochrome outlines.
     // Skip fonts exceeding the asset size limit (e.g. Apple Color Emoji ~192MB).
     if let Some(emoji_path) = detect_emoji_font() {
-        if let Ok(meta) = std::fs::metadata(&emoji_path) {
-            if meta.len() < 64 * 1024 * 1024 {
-                font_face_paths.push(emoji_path);
-            }
-        }
+        font_face_paths.push(emoji_path);
     }
     // COLRv1 emoji font: auto-download for native color emoji rendering
     // (krilla supports COLR via Type3 PDF font embedding since v0.7;
@@ -1134,6 +1136,9 @@ fn main() -> Result<()> {
             println!("║  Zoom:       {:<5.1}%                 ", zoom_pct);
             println!("║  Text items: {:<4}                   ", text_items);
             println!("║  Images:     {:<4}                   ", images);
+            if img_constrained > 0 {
+                println!("║  Img scaled: {:<4} to page width     ", img_constrained);
+            }
             if let Some(ref t) = title { println!("║  Title:      {}", t); }
             if let Some(ref h) = hash_str {
                 println!("║  SHA-256:    {}…", &h[..32.min(h.len())]);
