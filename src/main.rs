@@ -676,6 +676,29 @@ fn main() -> Result<()> {
         None
     };
 
+    // ── Image width constraint: scale images that exceed page content width ──
+    let margin_mm: f64 = resolved_margin
+        .map(|m| (m.left as f64 + m.right as f64) / 72.0 * 25.4)
+        .unwrap_or(20.0); // default ~10mm each side
+    let size_mm = page_size_mm(resolved_size.as_deref().unwrap_or("A4"))
+        .unwrap_or((210.0, 297.0));
+    let page_w_mm = if resolved_landscape {
+        size_mm.1
+    } else {
+        size_mm.0
+    };
+    let content_w_mm = page_w_mm - margin_mm;
+    let content_w_pt = content_w_mm * 72.0 / 25.4;
+
+    let (constrained_html, img_constrained, img_warnings) =
+        typepress::css_layout::constrain_images_to_page(&html, content_w_pt);
+    if img_constrained > 0 {
+        html = constrained_html;
+        eprintln!("Constrained {img_constrained} image(s) to page width ({content_w_mm:.0}mm / {content_w_pt:.0}pt)");
+        for w in &img_warnings {
+            eprintln!("  {w}");
+        }
+    }
     // 4. Build engine
     let mut builder = Engine::builder();
 
@@ -1022,89 +1045,109 @@ fn main() -> Result<()> {
         }
     }
 
-    // --check: diagnostic report
-    if cli.check {
+    // ── Render stats for --json / --hash / --check ──
+    if cli.json || cli.hash || cli.check {
         let check_path = pdf_path_for_check.as_deref().unwrap_or_else(|| {
-            // No file output (e.g. stdout or YAML-only), write to temp
             let tmp = std::env::temp_dir().join("typepress_check.pdf");
             std::fs::write(&tmp, &pdf).ok();
-            // Leak the PathBuf to get &Path lifetime — tiny, one-shot allocation
             Box::leak(Box::new(tmp)).as_path()
         });
-        match fulgur::inspect::inspect(check_path) {
-            Ok(report) => {
-                let size_mm = page_size_mm(resolved_size.as_deref().unwrap_or("A4"))
-                    .unwrap_or((210.0, 297.0));
-                let (pw, ph) = if resolved_landscape {
-                    (size_mm.1, size_mm.0)
-                } else {
-                    size_mm
-                };
-                let zoom_pct = effective_zoom * 100.0;
-                let pages = report.pages;
 
-                println!();
-                println!("╔══════════════════════════════════════╗");
-                println!("║  TypePress Diagnostic Report         ║");
-                println!("╠══════════════════════════════════════╣");
-                println!(
-                    "║  Page size:  {:>4.0}×{:<4.0} mm ({})",
-                    pw,
-                    ph,
-                    if resolved_landscape {
-                        "landscape"
+        let pages = typepress::css_layout::count_pdf_pages(&pdf);
+        let bytes = pdf.len() as u64;
+        let mut hash_str = None;
+        let mut text_items = 0usize;
+        let mut images = 0usize;
+        let mut title: Option<String> = None;
+        let mut warnings: Vec<String> = Vec::new();
+
+        if cli.hash {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(&pdf);
+            hash_str = Some(format!("{:x}", hasher.finalize()));
+        }
+
+        if let Ok(report) = fulgur::inspect::inspect(check_path) {
+            text_items = report.text_items.len();
+            images = report.images.len();
+            title = report.metadata.title.clone();
+            if pages > 1 && !cli.fit && !cli.autofit {
+                warnings.push("multi-page output (try --fit or --page-size A3)".into());
+            }
+            if text_items == 0 && images == 0 {
+                warnings.push("no text or images — possible rendering failure".into());
+            }
+        }
+
+        let size_mm = page_size_mm(resolved_size.as_deref().unwrap_or("A4"))
+            .unwrap_or((210.0, 297.0));
+        let (pw, ph) = if resolved_landscape {
+            (size_mm.1, size_mm.0)
+        } else {
+            size_mm
+        };
+
+        // --json
+        if cli.json {
+            let output = serde_json::json!({
+                "ok": true,
+                "pages": pages,
+                "bytes": bytes,
+                "page_size": format!("{}x{}mm", pw as u32, ph as u32),
+                "landscape": resolved_landscape,
+                "text_items": text_items,
+                "images": images,
+                "images_constrained": img_constrained,
+                "hash_sha256": hash_str,
+                "title": title,
+                "warnings": warnings,
+            });
+            println!("{}", serde_json::to_string(&output).unwrap());
+        }
+
+        // --hash (standalone)
+        if cli.hash && !cli.json {
+            if let Some(ref h) = hash_str {
+                if cli.quiet { println!("{h}"); }
+                else { eprintln!("SHA-256: {h}"); }
+            }
+        }
+
+        // --check (human-readable)
+        if cli.check {
+            let zoom_pct = effective_zoom * 100.0;
+            println!();
+            println!("╔══════════════════════════════════════╗");
+            println!("║  TypePress Diagnostic Report         ║");
+            println!("╠══════════════════════════════════════╣");
+            println!("║  Page size:  {:>4.0}×{:<4.0} mm ({})",
+                pw, ph,
+                if resolved_landscape { "landscape" } else { "portrait" });
+            println!("║  Pages:      {:<4}                   ", pages);
+            println!("║  File size:  {:<6} bytes            ", bytes);
+            println!("║  Zoom:       {:<5.1}%                 ", zoom_pct);
+            println!("║  Text items: {:<4}                   ", text_items);
+            println!("║  Images:     {:<4}                   ", images);
+            if let Some(ref t) = title { println!("║  Title:      {}", t); }
+            if let Some(ref h) = hash_str {
+                println!("║  SHA-256:    {}…", &h[..32.min(h.len())]);
+            }
+            println!("╠══════════════════════════════════════╣");
+            if warnings.is_empty() {
+                println!("║  ✅  No issues detected              ║");
+            } else {
+                for w in &warnings {
+                    let prefix = "║  ⚠  ";
+                    let max_len = 38 - prefix.len();
+                    if w.len() > max_len {
+                        println!("{} {}…", prefix, &w[..max_len - 1]);
                     } else {
-                        "portrait"
-                    }
-                );
-                println!("║  Pages:      {:<4}                   ", pages);
-                println!("║  Zoom:       {:<5.1}%                 ", zoom_pct);
-                println!(
-                    "║  Text items: {:<4}                   ",
-                    report.text_items.len()
-                );
-                println!(
-                    "║  Images:     {:<4}                   ",
-                    report.images.len()
-                );
-                if let Some(ref t) = report.metadata.title {
-                    println!("║  Title:      {}", t);
-                }
-                println!("╠══════════════════════════════════════╣");
-
-                let mut warnings: Vec<&str> = Vec::new();
-                if pages > 1 && !cli.fit {
-                    warnings.push("multi-page output (try --fit or --page-size A3)");
-                }
-                if zoom_pct > 0.1 && zoom_pct < 60.0 {
-                    warnings.push("zoom < 60% — text may be hard to read");
-                }
-                if report.text_items.is_empty() && report.images.is_empty() {
-                    warnings.push("no text or images — possible rendering failure");
-                }
-                if pages > 1 && cli.fit {
-                    warnings.push("--fit could not reduce to 1 page (try larger page)");
-                }
-
-                if warnings.is_empty() {
-                    println!("║  ✅  No issues detected              ║");
-                } else {
-                    for w in &warnings {
-                        // Truncate long warnings to fit the box width (36 chars minus prefix)
-                        let prefix = "║  ⚠  ";
-                        let max_len = 38 - prefix.len();
-                        if w.len() > max_len {
-                            println!("{} {}…", prefix, &w[..max_len - 1]);
-                        } else {
-                            println!("{}{}", prefix, w);
-                        }
+                        println!("{}{}", prefix, w);
                     }
                 }
-                println!("╚══════════════════════════════════════╝");
             }
-            Err(e) => {
-                eprintln!("Check: failed to inspect PDF: {e}");
-            }
+            println!("╚══════════════════════════════════════╝");
         }
     }
 

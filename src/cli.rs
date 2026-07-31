@@ -103,6 +103,12 @@ pub struct Cli {
     pub pdf_ua: bool,
     #[arg(long = "no-system-fonts")]
     pub no_system_fonts: bool,
+    /// Output render result as JSON (page count, file size, hash, warnings)
+    #[arg(long)]
+    pub json: bool,
+    /// Print SHA-256 hash of the output PDF
+    #[arg(long)]
+    pub hash: bool,
 }
 
 impl Cli {

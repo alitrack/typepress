@@ -2,6 +2,7 @@
 
 /// Default CSS for print/document styling injected into Markdown output.
 pub const DEFAULT_PRINT_CSS: &str = r#"
+    body { font-family: 'Heiti SC', 'Hiragino Sans GB', 'PingFang SC', 'STHeiti', 'Noto Sans CJK SC', sans-serif; }
     table { border-collapse: collapse; width: 100%; }
     th { background: #eee; font-weight: bold; }
     td, th { border: 1px solid #999; padding: 4pt 8pt; text-align: left; }

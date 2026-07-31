@@ -730,6 +730,67 @@ pub fn count_pdf_pages(pdf: &[u8]) -> usize {
     re.find_iter(&text).count()
 }
 
+/// Constrain all <img> tags so their width fits within the page content area.
+/// Images wider than `content_width_pt` are scaled down proportionally.
+/// Returns the modified HTML, count of images constrained, and warnings.
+pub fn constrain_images_to_page(html: &str, content_width_pt: f64) -> (String, usize, Vec<String>) {
+    let img_re = Regex::new(
+        r#"<img\b[^>]*>"#
+    ).unwrap();
+    let w_attr_re = Regex::new(r#"width="(\d+(?:\.\d+)?)""#).unwrap();
+    let h_attr_re = Regex::new(r#"height="(\d+(?:\.\d+)?)""#).unwrap();
+    let style_w_re = Regex::new(r"width:\s*(\d+(?:\.\d+)?)\s*px").unwrap();
+
+    let mut count = 0;
+    let mut warnings = Vec::new();
+
+    let result = img_re.replace_all(html, |caps: &regex::Captures| {
+        let full = caps.get(0).unwrap().as_str();
+        
+        let w: Option<f64> = w_attr_re.captures(full)
+            .and_then(|c| c.get(1))
+            .and_then(|m| m.as_str().parse().ok())
+            .or_else(|| {
+                style_w_re.captures(full)
+                    .and_then(|c| c.get(1))
+                    .and_then(|m| m.as_str().parse().ok())
+            });
+        
+        if let Some(img_w) = w {
+            if img_w > content_width_pt {
+                let scale = content_width_pt / img_w;
+                let new_w = content_width_pt;
+                
+                let h: Option<f64> = h_attr_re.captures(full)
+                    .and_then(|c| c.get(1))
+                    .and_then(|m| m.as_str().parse().ok());
+                let new_h = h.map(|h_val| (h_val * scale).round());
+
+                // Remove old width/height attributes and style width
+                let mut new_tag = w_attr_re.replace(full, "").to_string();
+                new_tag = h_attr_re.replace(&new_tag, "").to_string();
+                new_tag = style_w_re.replace(&new_tag, "").to_string();
+                
+                // Insert new width/height attributes
+                let w_attr = format!("width=\"{:.0}\"", new_w);
+                let h_attr = new_h.map(|hv| format!(" height=\"{:.0}\"", hv)).unwrap_or_default();
+                let before_close = new_tag.rfind('>').map(|p| p).unwrap_or(new_tag.len());
+                new_tag.insert_str(before_close, &format!(" {w_attr}{h_attr}"));
+
+                warnings.push(format!(
+                    "image scaled {:.0}→{:.0}px (page content width {:.0}pt)",
+                    img_w, new_w, content_width_pt
+                ));
+                count += 1;
+                return new_tag;
+            }
+        }
+        full.to_string()
+    });
+
+    (result.to_string(), count, warnings)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
