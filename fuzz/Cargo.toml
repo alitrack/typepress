@@ -1,0 +1,25 @@
+# cargo-fuzz targets for TypePress.
+#
+# fuzz targets are excluded from the published crate (include whitelist).
+[package]
+name = "typepress-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+typepress = { path = ".." }
+
+[[bin]]
+name = "markdown_to_html"
+path = "fuzz_targets/markdown_to_html.rs"
+doc = false
+
+[[bin]]
+name = "process_markdown_pipeline"
+path = "fuzz_targets/process_markdown_pipeline.rs"
+doc = false

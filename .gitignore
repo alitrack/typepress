@@ -3,3 +3,4 @@
 /openspec
 deps/fulgur/target/
 deps/blitz-html
+fuzz/target
