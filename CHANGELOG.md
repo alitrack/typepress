@@ -1,43 +1,46 @@
 # Changelog
 
-## [0.4.0] — 2026-06-24
+All notable changes to TypePress are documented here. Format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
+follows [Semantic Versioning](https://semver.org/).
 
-### Removed (Breaking)
-- **SVG/PNG output removed** — TypePress is now PDF-only. `--format svg`/`--format png` no longer supported.
-- PDF→SVG text extraction moved to independent [pdf2svg](https://github.com/alitrack/pdf2svg) project
-- Removed `tiny-skia`, `resvg`, `lopdf` dependencies
-- Removed `smart-zoom.py` — TypePress is pure Rust, no Python scripts
+## [0.4.0] - 2026-08-15
 
-### Added
-- COLRv1 color emoji native rendering (NotoColorEmoji auto-download)
-- SVG font embedding for emoji fallback
-- HTTP download timeouts (configurable, default 30s)
-- Python subprocess timeout (60s for math/Mermaid rendering)
-- npm and PyPI publish to GitHub Release workflow
-- CI: format, clippy, build, test jobs
+### Breaking
 
-### Fixed
-- CJK SVG text extraction: multi-block CMap parsing, Y-axis flip, per-page font subsets
-- Interleaved CID format auto-detection in fulgur TJ streams
-- UTF-16 surrogate pair handling for Type3/COLR fonts
-- `--zoom` now scales CSS px values instead of transform wrapper
-- `download_remote_images` counter bug (never incremented)
-- Dead config fields `output.svg`/`output.png` removed
-- `noyalib` → `serde_yaml` (legacy dependency)
-
-## [0.3.2] — 2026-06-24
-
-### Changed
-- fulgur fork upgraded to blitz-html 0.3 (native CSS flex/grid layout)
-- COLR color emoji support via krilla 0.7
-- CSS Layout preprocessor removed — blitz-html 0.3 natively handles flex/grid
+- `--json` `warnings` is now an object array
+  (`[{"code": "TP-1001", "message": "..."}]`) instead of a flat string
+  array — machine consumers must parse the new shape.
+- `--strict` now exits with code `2` when any warning was emitted
+  (previously it exited `1` when an image was constrained). Exit-code
+  contract: `0` success, `1` fatal error, `2` strict-with-warnings.
 
 ### Added
-- `--font` CLI option for custom font files (Unifont COLR emoji, CJK)
-- CI: `fonts-noto-cjk` for reftest CJK coverage
-- `agent-knowledge-map.html` knowledge graph layout test case
+
+- Structured diagnostics: every recoverable failure is reported as a
+  warning with a stable code (TP-1001…TP-1010) — nothing fails silently.
+- Resource limits for remote assets:
+  - `--max-asset-size N` (default 10 MiB, `0` = unlimited) with
+    Content-Length pre-check, body post-check, and cache-bypass guard.
+  - https-only by default; `--allow-http` opts into plain http.
+  - `--asset-allowlist glob1,glob2` host allowlist (`*` wildcard,
+    comma-separated or repeatable).
+  - 5-hop redirect cap on all download paths (images, CSS, fonts, emoji).
+- Vendor `blitz-html` to collect HTML parse errors instead of printing
+  raw `ERROR:` lines to stdout (which corrupted `--json` output).
 
 ### Fixed
-- CI: `libfontconfig-dev` dependency for Linux builds
-- Clippy warnings resolved across workspace (28 warnings)
-- Version alignment: Cargo.toml, pyproject.toml, package.json, Python/Node in-code VERSION
+
+- `--json` output is now clean machine JSON — no stray `ERROR:` lines.
+- Cached remote assets are re-validated against the size cap.
+- `fonts` module lives in the library crate (was duplicated between
+  lib and bin, causing inconsistent resolution).
+
+### Verified
+
+- CJK searchability: Type0 CID fonts with ToUnicode CMaps; text layer
+  (BT/Tj) confirmed for Simplified/Traditional/GBK rare characters;
+  copy-paste roundtrip lossless; deterministic output (identical
+  SHA-256 across runs).
+
+[0.4.0]: https://github.com/alitrack/typepress/compare/v0.3.0...v0.4.0

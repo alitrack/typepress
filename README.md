@@ -51,6 +51,34 @@ typepress doc.md -o out.pdf --math
 typepress render  # auto-detects typepress.yaml
 ```
 
+### Remote Assets & Exit Codes
+
+Remote assets (images, CSS, web fonts, emoji) are fetched with a safety
+policy that can be tightened per run:
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--max-asset-size N` | `10485760` (10 MiB) | Max bytes per downloaded asset; `0` = unlimited |
+| `--allow-http` | off | Allow plain-http (non-TLS) fetches |
+| `--asset-allowlist glob1,glob2` | none | Only fetch hosts matching these globs (`*` wildcard) |
+
+Fetch failures never abort the render — they are collected as structured
+warnings (`TP-1001` download failed, `TP-1002` zero-byte, `TP-1003` over
+size cap, `TP-1004` CSS, `TP-1005` font/emoji, `TP-1007` unsized image
+skipped, `TP-1009` multi-page output, `TP-1010` empty result).
+
+Exit codes (programmable rendering):
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `1` | Fatal error |
+| `2` | `--strict` mode: rendered but warnings were emitted |
+
+`--json` emits machine-readable output; `warnings` is an object array
+(`[{"code": "TP-1001", "message": "..."}]`). All recoverable failures are
+reported as warnings — nothing fails silently.
+
 ### Configuration
 
 Create `typepress.yaml` in your project root:
