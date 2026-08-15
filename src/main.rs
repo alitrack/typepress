@@ -8,16 +8,6 @@
 use anyhow::Result;
 use clap::Parser;
 use fulgur::asset::AssetBundle;
-#[cfg(feature = "mermaid-render")]
-use std::cell::RefCell;
-
-#[cfg(feature = "mermaid-render")]
-type MermaidImage = (String, Vec<u8>);
-
-#[cfg(feature = "mermaid-render")]
-thread_local! {
-    static MERMAID_IMAGES: RefCell<Option<Vec<MermaidImage>>> = const { RefCell::new(None) };
-}
 
 use fulgur::engine::Engine;
 use std::path::{Path, PathBuf};
@@ -194,30 +184,7 @@ fn svg_to_png_bytes(svg_fragment: &str, w: f32, h: f32, index: usize) -> Result<
     Ok((name, pixmap.encode_png()?))
 }
 
-/// Merge multiple PNG byte buffers into a single vertical composite PNG.
-/// Returns the composite as PNG bytes.
-fn merge_pngs_vertical(images: &[(String, Vec<u8>)], gap: u32) -> Result<Vec<u8>> {
-    use tiny_skia::Pixmap;
-    let mut decoded: Vec<Pixmap> = Vec::new();
-    for (_name, data) in images {
-        let p = Pixmap::decode_png(data)?;
-        decoded.push(p);
-    }
-    let total_w = decoded.iter().map(|p| p.width()).max().unwrap_or(0);
-    let gap_h = if decoded.len() > 1 { gap * (decoded.len() as u32 - 1) } else { 0 };
-    let total_h: u32 = decoded.iter().map(|p| p.height()).sum::<u32>() + gap_h;
-    let mut composite = Pixmap::new(total_w, total_h)
-        .ok_or_else(|| anyhow::anyhow!("merge_pngs_vertical: pixmap {total_w}x{total_h}"))?;
-    composite.fill(tiny_skia::Color::WHITE);
-    let mut y: u32 = 0;
-    for pix in &decoded {
-        composite.draw_pixmap(0, y as i32, pix.as_ref(), &tiny_skia::PixmapPaint::default(),
-            tiny_skia::Transform::identity(), None);
-        y += pix.height() + gap;
-    }
-    Ok(composite.encode_png()?)
-}
-
+/// Detect a math-capable system font for KaTeX rendering.
 fn detect_math_system_font() -> Option<(PathBuf, String)> {
     // Priority-ordered list of math-capable fonts available on most Linux systems
     let candidates: &[(&str, &str)] = &[
@@ -264,10 +231,10 @@ fn detect_emoji_font() -> Option<PathBuf> {
         let p = std::path::Path::new(path);
         if p.exists() {
             // Skip fonts that exceed the asset size limit
-            if let Ok(meta) = std::fs::metadata(p) {
-                if meta.len() >= 64 * 1024 * 1024 {
-                    continue;
-                }
+            if let Ok(meta) = std::fs::metadata(p)
+                && meta.len() >= 64 * 1024 * 1024
+            {
+                continue;
             }
             eprintln!("Emoji font: {}", p.display());
             return Some(p.to_path_buf());
@@ -457,7 +424,9 @@ fn main() -> Result<()> {
     let header_css;
 
     #[cfg(feature = "mermaid-render")]
-    let mut mermaid_images: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut mermaid_images: Vec<(String, Vec<u8>)>;
+
+    let mut remote_images: Vec<(String, Vec<u8>)> = Vec::new();
 
     if is_md {
         // MD pipeline: Mermaid → Math → Markdown→HTML → Header/Footer → Highlight
@@ -502,6 +471,17 @@ fn main() -> Result<()> {
         // 1. Inject header/footer
         header_css = inject_header_footer(&mut html, header.as_deref(), footer.as_deref());
 
+        // 0d. Download remote images (after markdown→HTML so <img> tags exist)
+        match typepress::network::download_remote_images(&mut html) {
+            Ok(imgs) => {
+                if !imgs.is_empty() {
+                    eprintln!("Downloaded {} remote image(s)", imgs.len());
+                    remote_images = imgs;
+                }
+            }
+            Err(e) => eprintln!("Warning: remote images: {e}"),
+        }
+
         // Inject @font-face for math system font (maps 'TypePressMath' to a real font file)
         // This must happen BEFORE extract_font_faces_from_html() so the @font-face rule
         // is picked up and the font file is added to the AssetBundle.
@@ -538,8 +518,12 @@ fn main() -> Result<()> {
             }
         }
         match typepress::network::download_remote_images(&mut html) {
-            Ok((n, _)) if n > 0 => eprintln!("Downloaded {n} remote image(s)"),
-            Ok(_) => {}
+            Ok(imgs) => {
+                if !imgs.is_empty() {
+                    eprintln!("Downloaded {} remote image(s)", imgs.len());
+                    remote_images = imgs;
+                }
+            }
             Err(e) => eprintln!("Warning: remote images: {e}"),
         }
 
@@ -621,23 +605,23 @@ fn main() -> Result<()> {
         }
     }
 
-    let has_mermaid_images = {
-        #[cfg(feature = "mermaid-render")]
-        {
-            MERMAID_IMAGES.with(|cell| cell.borrow().is_some())
-        }
-        #[cfg(not(feature = "mermaid-render"))]
-        {
-            false
-        }
-    };
     let needs_assets = !cli.fonts.is_empty()
         || !cli.css_files.is_empty()
         || header_css.is_some()
         || !math_fonts.is_empty()
         || !font_face_paths.is_empty()
-        || !mermaid_images.is_empty()
-        || !cli.images.is_empty();
+        || !cli.images.is_empty()
+        || !remote_images.is_empty()
+        || {
+            #[cfg(feature = "mermaid-render")]
+            {
+                !mermaid_images.is_empty()
+            }
+            #[cfg(not(feature = "mermaid-render"))]
+            {
+                false
+            }
+        };
 
     let assets = if needs_assets {
         let mut bundle = AssetBundle::new();
@@ -670,12 +654,20 @@ fn main() -> Result<()> {
                 bundle.add_image(name, data);
             }
         }
+        // Remote <img src="https://..."> downloads
+        for (name, data) in remote_images.drain(..) {
+            bundle.add_image(name, data);
+        }
         // CLI -i / --image flag images
         for (name, path) in &cli.images {
             if let Ok(data) = std::fs::read(path) {
                 bundle.add_image(name, data);
             } else {
-                eprintln!("Warning: cannot read image {} ({}): file not found", name, path.display());
+                eprintln!(
+                    "Warning: cannot read image {} ({}): file not found",
+                    name,
+                    path.display()
+                );
             }
         }
         Some(bundle)
@@ -687,8 +679,7 @@ fn main() -> Result<()> {
     let margin_mm: f64 = resolved_margin
         .map(|m| (m.left as f64 + m.right as f64) / 72.0 * 25.4)
         .unwrap_or(20.0); // default ~10mm each side
-    let size_mm = page_size_mm(resolved_size.as_deref().unwrap_or("A4"))
-        .unwrap_or((210.0, 297.0));
+    let size_mm = page_size_mm(resolved_size.as_deref().unwrap_or("A4")).unwrap_or((210.0, 297.0));
     let page_w_mm = if resolved_landscape {
         size_mm.1
     } else {
@@ -701,7 +692,9 @@ fn main() -> Result<()> {
         typepress::css_layout::constrain_images_to_page(&html, content_w_pt);
     if img_constrained > 0 {
         html = constrained_html;
-        eprintln!("Constrained {img_constrained} image(s) to page width ({content_w_mm:.0}mm / {content_w_pt:.0}pt)");
+        eprintln!(
+            "Constrained {img_constrained} image(s) to page width ({content_w_mm:.0}mm / {content_w_pt:.0}pt)"
+        );
         for w in &img_warnings {
             eprintln!("  {w}");
         }
@@ -807,7 +800,7 @@ fn main() -> Result<()> {
     }
 
     let engine = builder.build();
-    let mut pdf = engine.render_html(&html)?;
+    let mut pdf = engine.render(&html)?;
     let mut effective_zoom = cli.zoom as f64;
 
     // --autofit: try increasingly larger page sizes + orientations,
@@ -849,7 +842,7 @@ fn main() -> Result<()> {
                     eb = eb.assets(a.clone());
                 }
                 let candidate_engine = eb.build();
-                let candidate_pdf = candidate_engine.render_html(&html)?;
+                let candidate_pdf = candidate_engine.render(&html)?;
                 let candidate_pages = typepress::css_layout::count_pdf_pages(&candidate_pdf);
 
                 let zoom = if candidate_pages <= 1 {
@@ -861,7 +854,7 @@ fn main() -> Result<()> {
                     for _ in 0..12 {
                         let mid = (lo + hi) / 2.0;
                         let scaled = typepress::css_layout::scale_css_for_fit(&html, mid);
-                        let p = candidate_engine.render_html(&scaled)?;
+                        let p = candidate_engine.render(&scaled)?;
                         if typepress::css_layout::count_pdf_pages(&p) <= 1 {
                             lo = mid;
                         } else {
@@ -931,7 +924,7 @@ fn main() -> Result<()> {
                 } else {
                     // Apply zoom scaling and re-render
                     let scaled_html = typepress::css_layout::scale_css_for_fit(&html, zoom);
-                    pdf = final_engine.render_html(&scaled_html)?;
+                    pdf = final_engine.render(&scaled_html)?;
                 }
 
                 eprintln!(
@@ -959,7 +952,7 @@ fn main() -> Result<()> {
             for _ in 0..12 {
                 let mid = (lo + hi) / 2.0;
                 let scaled = typepress::css_layout::scale_css_for_fit(&html, mid);
-                let p = engine.render_html(&scaled)?;
+                let p = engine.render(&scaled)?;
                 if typepress::css_layout::count_pdf_pages(&p) <= 1 {
                     lo = mid; // fits → try larger
                 } else {
@@ -997,7 +990,7 @@ fn main() -> Result<()> {
             let mut scale = lo * 0.995;
             for retry in 0..8 {
                 let scaled_html = typepress::css_layout::scale_css_for_fit(&html, scale);
-                let p = engine.render_html(&scaled_html)?;
+                let p = engine.render(&scaled_html)?;
                 if typepress::css_layout::count_pdf_pages(&p) <= 1 {
                     pdf = p;
                     break;
@@ -1087,8 +1080,8 @@ fn main() -> Result<()> {
             }
         }
 
-        let size_mm = page_size_mm(resolved_size.as_deref().unwrap_or("A4"))
-            .unwrap_or((210.0, 297.0));
+        let size_mm =
+            page_size_mm(resolved_size.as_deref().unwrap_or("A4")).unwrap_or((210.0, 297.0));
         let (pw, ph) = if resolved_landscape {
             (size_mm.1, size_mm.0)
         } else {
@@ -1114,10 +1107,14 @@ fn main() -> Result<()> {
         }
 
         // --hash (standalone)
-        if cli.hash && !cli.json {
-            if let Some(ref h) = hash_str {
-                if cli.quiet { println!("{h}"); }
-                else { eprintln!("SHA-256: {h}"); }
+        if cli.hash
+            && !cli.json
+            && let Some(ref h) = hash_str
+        {
+            if cli.quiet {
+                println!("{h}");
+            } else {
+                eprintln!("SHA-256: {h}");
             }
         }
 
@@ -1128,9 +1125,16 @@ fn main() -> Result<()> {
             println!("╔══════════════════════════════════════╗");
             println!("║  TypePress Diagnostic Report         ║");
             println!("╠══════════════════════════════════════╣");
-            println!("║  Page size:  {:>4.0}×{:<4.0} mm ({})",
-                pw, ph,
-                if resolved_landscape { "landscape" } else { "portrait" });
+            println!(
+                "║  Page size:  {:>4.0}×{:<4.0} mm ({})",
+                pw,
+                ph,
+                if resolved_landscape {
+                    "landscape"
+                } else {
+                    "portrait"
+                }
+            );
             println!("║  Pages:      {:<4}                   ", pages);
             println!("║  File size:  {:<6} bytes            ", bytes);
             println!("║  Zoom:       {:<5.1}%                 ", zoom_pct);
@@ -1139,7 +1143,9 @@ fn main() -> Result<()> {
             if img_constrained > 0 {
                 println!("║  Img scaled: {:<4} to page width     ", img_constrained);
             }
-            if let Some(ref t) = title { println!("║  Title:      {}", t); }
+            if let Some(ref t) = title {
+                println!("║  Title:      {}", t);
+            }
             if let Some(ref h) = hash_str {
                 println!("║  SHA-256:    {}…", &h[..32.min(h.len())]);
             }

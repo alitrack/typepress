@@ -165,7 +165,7 @@ pub fn render_markdown_to_pdf(
         builder = builder.assets(a);
     }
     let engine = builder.build();
-    let pdf = engine.render_html(&html)?;
+    let pdf = engine.render(&html)?;
     std::fs::write(output, &pdf)?;
     Ok(())
 }
