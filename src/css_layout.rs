@@ -6,6 +6,7 @@
 //
 // This runs BEFORE the HTML enters fulgur's rendering pipeline.
 
+use crate::diagnostics::Diagnostics;
 use regex::Regex;
 
 /// Process CSS layout: Grid→Table, Flexbox→Table, Gradient→Solid.
@@ -733,7 +734,15 @@ pub fn count_pdf_pages(pdf: &[u8]) -> usize {
 /// Constrain all <img> tags so their width fits within the page content area.
 /// Images wider than `content_width_pt` are scaled down proportionally.
 /// Returns the modified HTML, count of images constrained, and warnings.
-pub fn constrain_images_to_page(html: &str, content_width_pt: f64) -> (String, usize, Vec<String>) {
+///
+/// An image whose width exceeds the content area but carries no height
+/// (so aspect ratio cannot be preserved) is left untouched and reported as
+/// TP-1007 through `diag` — it may overflow but stays visible.
+pub fn constrain_images_to_page(
+    html: &str,
+    content_width_pt: f64,
+    diag: &mut Diagnostics,
+) -> (String, usize, Vec<String>) {
     let img_re = Regex::new(r#"<img\b[^>]*>"#).unwrap();
     let w_attr_re = Regex::new(r#"width="(\d+(?:\.\d+)?)""#).unwrap();
     let h_attr_re = Regex::new(r#"height="(\d+(?:\.\d+)?)""#).unwrap();
@@ -779,6 +788,10 @@ pub fn constrain_images_to_page(html: &str, content_width_pt: f64) -> (String, u
             // Without a height we cannot preserve aspect ratio — leave the
             // tag untouched (it may overflow but stays visible).
             let Some(new_h) = new_h else {
+                diag.push(
+                    "TP-1007",
+                    format!("image too wide ({img_w:.0}px > {content_width_pt:.0}pt) but has no height — left unscaled"),
+                );
                 return full.to_string();
             };
 

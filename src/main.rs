@@ -329,6 +329,10 @@ fn inject_css(html: &mut String, css: &str) {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Structured warnings accumulator — every recoverable failure lands here
+    // (see src/diagnostics.rs for warning codes).
+    let mut diag = typepress::diagnostics::Diagnostics::new();
+
     // Load config: --config <file> or auto-detect typepress.yaml
     let cfg = if let Some(ref path) = cli.config {
         TypePressConfig::from_file(path)
@@ -472,7 +476,7 @@ fn main() -> Result<()> {
         header_css = inject_header_footer(&mut html, header.as_deref(), footer.as_deref());
 
         // 0d. Download remote images (after markdown→HTML so <img> tags exist)
-        match typepress::network::download_remote_images(&mut html) {
+        match typepress::network::download_remote_images(&mut html, &mut diag) {
             Ok(imgs) => {
                 if !imgs.is_empty() {
                     eprintln!("Downloaded {} remote image(s)", imgs.len());
@@ -505,7 +509,7 @@ fn main() -> Result<()> {
         // (old Grid→Table preprocessing removed — no longer needed)
 
         // 0b. Network resources: download remote CSS <link> + <img>
-        match typepress::network::inject_remote_css(&mut html) {
+        match typepress::network::inject_remote_css(&mut html, &mut diag) {
             Ok(n) if n > 0 => eprintln!("Downloaded {n} remote CSS file(s)"),
             Ok(_) => {}
             Err(e) => eprintln!("Warning: remote CSS: {e}"),
@@ -517,7 +521,7 @@ fn main() -> Result<()> {
                 Err(e) => eprintln!("Warning: local CSS: {e}"),
             }
         }
-        match typepress::network::download_remote_images(&mut html) {
+        match typepress::network::download_remote_images(&mut html, &mut diag) {
             Ok(imgs) => {
                 if !imgs.is_empty() {
                     eprintln!("Downloaded {} remote image(s)", imgs.len());
@@ -579,12 +583,17 @@ fn main() -> Result<()> {
             if !font_face_paths.iter().any(|p| p == &colr_path) {
                 font_face_paths.push(colr_path);
             }
+        } else {
+            diag.push(
+                "TP-1005",
+                "failed to download COLRv1 emoji font — emoji may render as boxes",
+            );
         }
     }
     for ff in fonts::extract_font_faces_from_html(&html) {
         match fonts::resolve_font_path(&ff.src_url, base_path.as_deref()) {
             Ok(path) => font_face_paths.push(path),
-            Err(e) => eprintln!("Warning: @font-face '{}': {e}", ff.family),
+            Err(e) => diag.push("TP-1005", format!("@font-face '{}': {e}", ff.family)),
         }
     }
 
@@ -595,10 +604,9 @@ fn main() -> Result<()> {
                 let css_dir = css_path.parent();
                 match fonts::resolve_font_path(&ff.src_url, css_dir.or(base_path.as_deref())) {
                     Ok(path) => font_face_paths.push(path),
-                    Err(e) => eprintln!(
-                        "Warning: @font-face '{}' in {}: {e}",
-                        ff.family,
-                        css_path.display()
+                    Err(e) => diag.push(
+                        "TP-1005",
+                        format!("@font-face '{}' in {}: {e}", ff.family, css_path.display()),
                     ),
                 }
             }
@@ -689,7 +697,7 @@ fn main() -> Result<()> {
     let content_w_pt = content_w_mm * 72.0 / 25.4;
 
     let (constrained_html, img_constrained, img_warnings) =
-        typepress::css_layout::constrain_images_to_page(&html, content_w_pt);
+        typepress::css_layout::constrain_images_to_page(&html, content_w_pt, &mut diag);
     if img_constrained > 0 {
         html = constrained_html;
         eprintln!(
@@ -1059,7 +1067,6 @@ fn main() -> Result<()> {
         let mut text_items = 0usize;
         let mut images = 0usize;
         let mut title: Option<String> = None;
-        let mut warnings: Vec<String> = Vec::new();
 
         if cli.hash {
             use sha2::{Digest, Sha256};
@@ -1073,12 +1080,13 @@ fn main() -> Result<()> {
             images = report.images.len();
             title = report.metadata.title.clone();
             if pages > 1 && !cli.fit && !cli.autofit {
-                warnings.push("multi-page output (try --fit or --page-size A3)".into());
+                diag.push("TP-1009", "multi-page output (try --fit or --page-size A3)");
             }
             if text_items == 0 && images == 0 {
-                warnings.push("no text or images — possible rendering failure".into());
+                diag.push("TP-1010", "no text or images — possible rendering failure");
             }
         }
+        let warnings = diag.warnings().to_vec();
 
         let size_mm =
             page_size_mm(resolved_size.as_deref().unwrap_or("A4")).unwrap_or((210.0, 297.0));
@@ -1155,11 +1163,12 @@ fn main() -> Result<()> {
             } else {
                 for w in &warnings {
                     let prefix = "║  ⚠  ";
+                    let msg = format!("[{}] {}", w.code, w.message);
                     let max_len = 38 - prefix.len();
-                    if w.len() > max_len {
-                        println!("{} {}…", prefix, &w[..max_len - 1]);
+                    if msg.len() > max_len {
+                        println!("{} {}…", prefix, &msg[..max_len - 1]);
                     } else {
-                        println!("{}{}", prefix, w);
+                        println!("{}{}", prefix, msg);
                     }
                 }
             }
@@ -1167,9 +1176,16 @@ fn main() -> Result<()> {
         }
     }
 
-    // --strict: exit code 1 if images were constrained
-    if cli.strict && img_constrained > 0 {
-        std::process::exit(1);
+    // ── Warning output (non-JSON mode): grep-able, stable codes ──
+    if !cli.json && !cli.check && !diag.is_empty() {
+        for w in diag.warnings() {
+            eprintln!("warning[{}]: {}", w.code, w.message);
+        }
+    }
+
+    // --strict: any warning → exit code 2 (fatal errors are already exit 1)
+    if cli.strict && !diag.is_empty() {
+        std::process::exit(2);
     }
 
     Ok(())

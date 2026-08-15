@@ -10,6 +10,7 @@
 //
 // We use reqwest::blocking for simplicity — same pattern as fonts.rs.
 
+use crate::diagnostics::Diagnostics;
 use anyhow::{Context, Result};
 use regex::Regex;
 use std::path::{Path, PathBuf};
@@ -68,7 +69,7 @@ fn download_to_cache(url: &str, cache_subdir: &str) -> Result<PathBuf> {
 ///
 /// Downloads each remote CSS file, injects it as a <style> block, and
 /// removes the original <link> tag (it can't be used by fulgur).
-pub fn inject_remote_css(html: &mut String) -> Result<usize> {
+pub fn inject_remote_css(html: &mut String, diag: &mut Diagnostics) -> Result<usize> {
     // Match <link> tags that have both rel=stylesheet and href=https?://
     let link_re =
         Regex::new(r#"(?i)<link\b[^>]*\bhref\s*=\s*["'](https?://[^"']+)["'][^>]*>"#).unwrap();
@@ -116,12 +117,15 @@ pub fn inject_remote_css(html: &mut String) -> Result<usize> {
                         eprintln!("CSS: downloaded {} → {}", url, path.display());
                     }
                     Err(e) => {
-                        eprintln!("Warning: CSS read error for {}: {}", url, e);
+                        diag.push(
+                            "TP-1004",
+                            format!("failed to read downloaded CSS {url}: {e}"),
+                        );
                     }
                 }
             }
             Err(e) => {
-                eprintln!("Warning: CSS download failed for {}: {}", url, e);
+                diag.push("TP-1004", format!("failed to download CSS {url}: {e}"));
             }
         }
     }
@@ -188,7 +192,22 @@ fn image_dimensions(data: &[u8]) -> Option<(u32, u32)> {
 /// AssetBundle registration is the ONLY path that renders images.
 /// ⚠️ fulgur drops `<img>` tags without an explicit size — we inject
 /// `style="width:Wpx;height:Hpx"` from the intrinsic image dimensions.
-pub fn download_remote_images(html: &mut String) -> Result<Vec<(String, Vec<u8>)>> {
+/// Process `<img src="https?://...">` tags.
+///
+/// Downloads each image, replaces the src attribute with a bundle-safe
+/// name (e.g. `txp-remote-0.png`), injects intrinsic size when the tag
+/// carries none, and returns `(bundle_name, bytes)` pairs for the caller
+/// to register in the AssetBundle. AssetBundle registration is the ONLY
+/// path that renders images; fulgur drops `<img>` tags without an explicit
+/// size — we inject `style="width:Wpx;height:Hpx"` from the intrinsic
+/// image dimensions.
+///
+/// Failures are reported through `diag` (TP-1001 download failed,
+/// TP-1002 read/zero-byte) and never abort the render.
+pub fn download_remote_images(
+    html: &mut String,
+    diag: &mut Diagnostics,
+) -> Result<Vec<(String, Vec<u8>)>> {
     let img_re =
         Regex::new(r#"(?i)<img\b[^>]*?\bsrc\s*=\s*["'](https?://[^"']+)["'][^>]*>"#).unwrap();
 
@@ -207,6 +226,10 @@ pub fn download_remote_images(html: &mut String) -> Result<Vec<(String, Vec<u8>)
         match download_to_cache(url, "images") {
             Ok(path) => match std::fs::read(&path) {
                 Ok(data) => {
+                    if data.is_empty() {
+                        diag.push("TP-1002", format!("zero-byte image: {url}"));
+                        continue;
+                    }
                     let name = format!("txp-remote-{}.png", images.len());
                     let mut new_tag = full_tag.replace(url, &name);
                     // Inject intrinsic size unless the tag already has one
@@ -227,11 +250,14 @@ pub fn download_remote_images(html: &mut String) -> Result<Vec<(String, Vec<u8>)
                     images.push((name, data));
                 }
                 Err(e) => {
-                    eprintln!("Warning: Image read error for {}: {}", url, e);
+                    diag.push(
+                        "TP-1002",
+                        format!("failed to read downloaded image {url}: {e}"),
+                    );
                 }
             },
             Err(e) => {
-                eprintln!("Warning: Image download failed for {}: {}", url, e);
+                diag.push("TP-1001", format!("failed to download image {url}: {e}"));
             }
         }
     }
@@ -293,15 +319,19 @@ mod tests {
     #[test]
     fn test_inject_remote_css_noop() {
         let mut html = "<html><head></head><body></body></html>".to_string();
-        let n = inject_remote_css(&mut html).unwrap();
+        let mut diag = Diagnostics::new();
+        let n = inject_remote_css(&mut html, &mut diag).unwrap();
         assert_eq!(n, 0);
+        assert!(diag.is_empty());
     }
 
     #[test]
     fn test_download_remote_images_noop() {
         let mut html = "<img src=\"data:image/png;base64,xxx\">".to_string();
-        let images = download_remote_images(&mut html).unwrap();
+        let mut diag = Diagnostics::new();
+        let images = download_remote_images(&mut html, &mut diag).unwrap();
         assert!(images.is_empty());
+        assert!(diag.is_empty());
     }
 
     #[test]

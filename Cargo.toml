@@ -50,6 +50,11 @@ opt-level = 3
 
 [patch.crates-io]
 fulgur = { path = "deps/fulgur" }
+# blitz-html vendored: stock 0.2.0's TreeSink::finish prints raw `ERROR:`
+# lines to stdout (corrupts --json machine output); we collect them as
+# `parse_warnings` on HtmlDocument instead. NOTE: version must satisfy
+# fulgur's `blitz-html = "0.2"` requirement (it does: we vendor 0.2.0).
+blitz-html = { path = "deps/blitzhtml-vendor" }
 
 [dev-dependencies]
 assert_cmd = "2"
