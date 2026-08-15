@@ -10,6 +10,7 @@ repository = "https://github.com/alitrack/typepress"
 # WSL dentry at deps/blitz-html that breaks `cargo package` directory scan.
 include = [
     "src/**",
+    "tests/**",
     "README.md",
     "CHANGELOG.md",
     "LICENSE-MIT",
