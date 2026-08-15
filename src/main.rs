@@ -11,13 +11,13 @@ use fulgur::asset::AssetBundle;
 
 use fulgur::engine::Engine;
 use std::path::{Path, PathBuf};
+mod cli;
 mod config;
-mod fonts;
+mod math;
 use config::TypePressConfig;
 use typepress::css::KATEX_CSS;
+use typepress::fonts;
 use typepress::{inject_header_footer, markdown_to_html};
-mod cli;
-mod math;
 
 use cli::{Cli, page_size_mm, parse_margin, parse_page_size, read_input};
 use math::process_math;
@@ -333,6 +333,13 @@ fn main() -> Result<()> {
     // (see src/diagnostics.rs for warning codes).
     let mut diag = typepress::diagnostics::Diagnostics::new();
 
+    // Remote asset policy: size cap, scheme, host allowlist.
+    let asset_limits = typepress::network::AssetLimits {
+        max_bytes: cli.max_asset_size,
+        allow_http: cli.allow_http,
+        allowlist: cli.asset_allowlist.clone(),
+    };
+
     // Load config: --config <file> or auto-detect typepress.yaml
     let cfg = if let Some(ref path) = cli.config {
         TypePressConfig::from_file(path)
@@ -476,7 +483,7 @@ fn main() -> Result<()> {
         header_css = inject_header_footer(&mut html, header.as_deref(), footer.as_deref());
 
         // 0d. Download remote images (after markdown→HTML so <img> tags exist)
-        match typepress::network::download_remote_images(&mut html, &mut diag) {
+        match typepress::network::download_remote_images(&mut html, &mut diag, &asset_limits) {
             Ok(imgs) => {
                 if !imgs.is_empty() {
                     eprintln!("Downloaded {} remote image(s)", imgs.len());
@@ -509,7 +516,7 @@ fn main() -> Result<()> {
         // (old Grid→Table preprocessing removed — no longer needed)
 
         // 0b. Network resources: download remote CSS <link> + <img>
-        match typepress::network::inject_remote_css(&mut html, &mut diag) {
+        match typepress::network::inject_remote_css(&mut html, &mut diag, &asset_limits) {
             Ok(n) if n > 0 => eprintln!("Downloaded {n} remote CSS file(s)"),
             Ok(_) => {}
             Err(e) => eprintln!("Warning: remote CSS: {e}"),
@@ -521,7 +528,7 @@ fn main() -> Result<()> {
                 Err(e) => eprintln!("Warning: local CSS: {e}"),
             }
         }
-        match typepress::network::download_remote_images(&mut html, &mut diag) {
+        match typepress::network::download_remote_images(&mut html, &mut diag, &asset_limits) {
             Ok(imgs) => {
                 if !imgs.is_empty() {
                     eprintln!("Downloaded {} remote image(s)", imgs.len());
@@ -579,7 +586,7 @@ fn main() -> Result<()> {
     //  CBDT bitmap fonts are NOT supported — we use the COLRv1 version)
     #[allow(clippy::collapsible_if)]
     if typepress::emoji::has_emoji(&html) {
-        if let Some(colr_path) = typepress::emoji::ensure_colr_emoji_font() {
+        if let Some(colr_path) = typepress::emoji::ensure_colr_emoji_font(&asset_limits) {
             if !font_face_paths.iter().any(|p| p == &colr_path) {
                 font_face_paths.push(colr_path);
             }
@@ -591,7 +598,7 @@ fn main() -> Result<()> {
         }
     }
     for ff in fonts::extract_font_faces_from_html(&html) {
-        match fonts::resolve_font_path(&ff.src_url, base_path.as_deref()) {
+        match fonts::resolve_font_path(&ff.src_url, base_path.as_deref(), &asset_limits) {
             Ok(path) => font_face_paths.push(path),
             Err(e) => diag.push("TP-1005", format!("@font-face '{}': {e}", ff.family)),
         }
@@ -602,7 +609,11 @@ fn main() -> Result<()> {
         if let Ok(css_content) = std::fs::read_to_string(css_path) {
             for ff in fonts::parse_font_faces(&css_content) {
                 let css_dir = css_path.parent();
-                match fonts::resolve_font_path(&ff.src_url, css_dir.or(base_path.as_deref())) {
+                match fonts::resolve_font_path(
+                    &ff.src_url,
+                    css_dir.or(base_path.as_deref()),
+                    &asset_limits,
+                ) {
                     Ok(path) => font_face_paths.push(path),
                     Err(e) => diag.push(
                         "TP-1005",

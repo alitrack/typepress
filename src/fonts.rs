@@ -8,15 +8,17 @@
 // Remote fonts are downloaded and cached in a temp directory.
 // All discovered fonts are added to the fulgur AssetBundle.
 
+use crate::network::{AssetLimits, DownloadError};
 use anyhow::{Context, Result};
 use regex::Regex;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// Create a blocking HTTP client with a 30-second timeout.
+/// Create a blocking HTTP client with a 30-second timeout and 5-hop redirect cap.
 fn http_client() -> reqwest::blocking::Client {
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::limited(5))
         .build()
         .expect("reqwest client creation should not fail")
 }
@@ -64,9 +66,13 @@ pub fn extract_font_faces_from_html(html: &str) -> Vec<FontFace> {
 /// - http(s):// URLs → download to a temp directory
 /// - Relative paths → resolve against base_path or cwd
 /// - Absolute paths → return as-is
-pub fn resolve_font_path(url: &str, base_path: Option<&Path>) -> Result<PathBuf> {
+pub fn resolve_font_path(
+    url: &str,
+    base_path: Option<&Path>,
+    limits: &AssetLimits,
+) -> Result<PathBuf> {
     if url.starts_with("http://") || url.starts_with("https://") {
-        download_font(url)
+        download_font(url, limits)
     } else if url.starts_with('/') || (url.len() > 2 && url.as_bytes()[1] == b':') {
         // Absolute path
         let p = PathBuf::from(url);
@@ -98,7 +104,9 @@ pub fn resolve_font_path(url: &str, base_path: Option<&Path>) -> Result<PathBuf>
     }
 }
 
-fn download_font(url: &str) -> Result<PathBuf> {
+fn download_font(url: &str, limits: &AssetLimits) -> Result<PathBuf> {
+    // Policy gates first: scheme + allowlist + size cap.
+    limits.check_url(url)?;
     let parsed = url
         .parse::<reqwest::Url>()
         .with_context(|| format!("Invalid font URL: {}", url))?;
@@ -118,6 +126,10 @@ fn download_font(url: &str) -> Result<PathBuf> {
     let dest = cache_dir.join(&filename);
 
     if dest.exists() {
+        // Cached copies must also respect the cap (cache bypass guard).
+        if let Ok(meta) = dest.metadata() {
+            limits.check_size(url, meta.len() as usize)?;
+        }
         return Ok(dest);
     }
 
@@ -125,9 +137,27 @@ fn download_font(url: &str) -> Result<PathBuf> {
         .get(url)
         .send()
         .with_context(|| format!("Failed to download font: {}", url))?;
+
+    // Content-Length pre-check (fast reject before reading the body).
+    if limits.max_bytes > 0
+        && let Some(len) = response.content_length()
+        && len > limits.max_bytes
+    {
+        return Err(DownloadError::TooLarge {
+            url: url.to_string(),
+            cap: limits.max_bytes,
+            got: len,
+        }
+        .into());
+    }
+
     let bytes = response
         .bytes()
         .with_context(|| format!("Failed to read font body: {}", url))?;
+
+    // Post-read size check (covers chunked/streamed bodies).
+    limits.check_size(url, bytes.len())?;
+
     std::fs::write(&dest, &bytes)
         .with_context(|| format!("Failed to write font to {}", dest.display()))?;
 

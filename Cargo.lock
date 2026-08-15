@@ -4001,6 +4001,7 @@ dependencies = [
  "sha2",
  "syntect",
  "tempfile",
+ "thiserror 2.0.20",
  "tiny-skia",
 ]
 

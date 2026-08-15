@@ -16,16 +16,148 @@ use regex::Regex;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// Create a blocking HTTP client with a 30-second timeout.
+/// Create a blocking HTTP client with a 30-second timeout and a 5-hop
+/// redirect cap (protects against redirect loops / open-redirect abuse).
 fn http_client() -> reqwest::blocking::Client {
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::limited(5))
         .build()
         .expect("reqwest client creation should not fail")
 }
 
+/// Limits applied to every remote asset fetch (images, CSS, fonts, emoji).
+///
+/// Defaults (when built from CLI flags): https-only, 10 MiB cap, no
+/// allowlist. A cap of 0 means unlimited. Allowlist entries are host
+/// globs (e.g. `*.example.com`, `cdn.example.com`); `*` matches any host.
+#[derive(Debug, Clone)]
+pub struct AssetLimits {
+    /// Maximum accepted body size in bytes. 0 = unlimited.
+    pub max_bytes: u64,
+    /// Allow plain-http (non-TLS) fetches. Default false (https-only).
+    pub allow_http: bool,
+    /// Host glob allowlist. Empty = allow any host.
+    pub allowlist: Vec<String>,
+}
+
+impl Default for AssetLimits {
+    fn default() -> Self {
+        Self {
+            max_bytes: 10 * 1024 * 1024, // 10 MiB
+            allow_http: false,
+            allowlist: Vec::new(),
+        }
+    }
+}
+
+impl AssetLimits {
+    /// Check whether a URL passes scheme + allowlist gates.
+    /// Returns Ok(()) if permitted, Err(DownloadError) with a stable reason.
+    pub fn check_url(&self, url: &str) -> Result<(), DownloadError> {
+        let parsed = url
+            .parse::<reqwest::Url>()
+            .map_err(|e| DownloadError::Other(anyhow::anyhow!("Invalid URL {url}: {e}")))?;
+        match parsed.scheme() {
+            "https" => {}
+            "http" if self.allow_http => {}
+            "http" => {
+                return Err(DownloadError::Blocked(format!(
+                    "plain-http blocked (use --allow-http): {url}"
+                )));
+            }
+            other => {
+                return Err(DownloadError::Blocked(format!(
+                    "unsupported scheme {other:?}: {url}"
+                )));
+            }
+        }
+        if !self.allowlist.is_empty() {
+            let host = parsed.host_str().unwrap_or("");
+            let matched = self
+                .allowlist
+                .iter()
+                .any(|pat| host_matches_glob(host, pat));
+            if !matched {
+                return Err(DownloadError::Blocked(format!(
+                    "host {host:?} not in asset allowlist: {url}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Enforce the byte cap against an already-read body.
+    pub fn check_size(&self, url: &str, len: usize) -> Result<(), DownloadError> {
+        if self.max_bytes > 0 && len as u64 > self.max_bytes {
+            return Err(DownloadError::TooLarge {
+                url: url.to_string(),
+                cap: self.max_bytes,
+                got: len as u64,
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Why a remote fetch was refused. Callers translate this into a stable
+/// TP-xxxx warning code (TooLarge → TP-1003; Blocked/Other → TP-1001/1004/1005).
+#[derive(Debug, thiserror::Error)]
+pub enum DownloadError {
+    #[error("asset exceeds {cap} bytes ({got} bytes): {url}")]
+    TooLarge { url: String, cap: u64, got: u64 },
+    #[error("{0}")]
+    Blocked(String),
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
+/// Simple glob match for host allowlist entries: `*` matches any sequence
+/// (including empty); everything else is matched literally.
+pub fn host_matches_glob(host: &str, pattern: &str) -> bool {
+    let p: Vec<char> = pattern.chars().collect();
+    let h: Vec<char> = host.chars().collect();
+    // Classic two-pointer wildcard match.
+    fn inner(
+        p: &[char],
+        h: &[char],
+        pi: usize,
+        hi: usize,
+        star: Option<usize>,
+        star_h: usize,
+    ) -> bool {
+        let mut pi = pi;
+        let mut hi = hi;
+        let mut star = star;
+        let mut star_h = star_h;
+        while hi < h.len() {
+            if pi < p.len() && (p[pi] == '?' || p[pi] == h[hi]) {
+                pi += 1;
+                hi += 1;
+            } else if pi < p.len() && p[pi] == '*' {
+                star = Some(pi);
+                star_h = hi;
+                pi += 1;
+            } else if let Some(s) = star {
+                pi = s + 1;
+                star_h += 1;
+                hi = star_h;
+            } else {
+                return false;
+            }
+        }
+        while pi < p.len() && p[pi] == '*' {
+            pi += 1;
+        }
+        pi == p.len()
+    }
+    inner(&p, &h, 0, 0, None, 0)
+}
+
 /// Download a URL to a temp file, with caching.
-fn download_to_cache(url: &str, cache_subdir: &str) -> Result<PathBuf> {
+fn download_to_cache(url: &str, cache_subdir: &str, limits: &AssetLimits) -> Result<PathBuf> {
+    // Policy gates first: scheme + allowlist.
+    limits.check_url(url)?;
     let cache_dir = std::env::temp_dir().join(".typepress").join(cache_subdir);
     std::fs::create_dir_all(&cache_dir)?;
 
@@ -50,6 +182,10 @@ fn download_to_cache(url: &str, cache_subdir: &str) -> Result<PathBuf> {
 
     let dest = cache_dir.join(&filename);
     if dest.exists() {
+        // Cached copies must also respect the cap (cache bypass guard).
+        if let Ok(meta) = dest.metadata() {
+            limits.check_size(url, meta.len() as usize)?;
+        }
         return Ok(dest);
     }
 
@@ -57,9 +193,27 @@ fn download_to_cache(url: &str, cache_subdir: &str) -> Result<PathBuf> {
         .get(url)
         .send()
         .with_context(|| format!("Failed to download: {}", url))?;
+
+    // Content-Length pre-check (fast reject before reading the body).
+    if limits.max_bytes > 0
+        && let Some(len) = response.content_length()
+        && len > limits.max_bytes
+    {
+        return Err(DownloadError::TooLarge {
+            url: url.to_string(),
+            cap: limits.max_bytes,
+            got: len,
+        }
+        .into());
+    }
+
     let bytes = response
         .bytes()
         .with_context(|| format!("Failed to read body: {}", url))?;
+
+    // Post-read size check (covers chunked/streamed bodies).
+    limits.check_size(url, bytes.len())?;
+
     std::fs::write(&dest, &bytes)
         .with_context(|| format!("Failed to write to {}", dest.display()))?;
     Ok(dest)
@@ -69,7 +223,11 @@ fn download_to_cache(url: &str, cache_subdir: &str) -> Result<PathBuf> {
 ///
 /// Downloads each remote CSS file, injects it as a <style> block, and
 /// removes the original <link> tag (it can't be used by fulgur).
-pub fn inject_remote_css(html: &mut String, diag: &mut Diagnostics) -> Result<usize> {
+pub fn inject_remote_css(
+    html: &mut String,
+    diag: &mut Diagnostics,
+    limits: &AssetLimits,
+) -> Result<usize> {
     // Match <link> tags that have both rel=stylesheet and href=https?://
     let link_re =
         Regex::new(r#"(?i)<link\b[^>]*\bhref\s*=\s*["'](https?://[^"']+)["'][^>]*>"#).unwrap();
@@ -96,7 +254,7 @@ pub fn inject_remote_css(html: &mut String, diag: &mut Diagnostics) -> Result<us
             continue;
         }
 
-        match download_to_cache(url, "css") {
+        match download_to_cache(url, "css", limits) {
             Ok(path) => {
                 match std::fs::read_to_string(&path) {
                     Ok(css) => {
@@ -125,7 +283,11 @@ pub fn inject_remote_css(html: &mut String, diag: &mut Diagnostics) -> Result<us
                 }
             }
             Err(e) => {
-                diag.push("TP-1004", format!("failed to download CSS {url}: {e}"));
+                if let Some(DownloadError::TooLarge { .. }) = e.downcast_ref::<DownloadError>() {
+                    diag.push("TP-1003", format!("{e}"));
+                } else {
+                    diag.push("TP-1004", format!("failed to download CSS {url}: {e}"));
+                }
             }
         }
     }
@@ -182,16 +344,6 @@ fn image_dimensions(data: &[u8]) -> Option<(u32, u32)> {
     None
 }
 
-/// Process <img src="https?://..."> tags.
-///
-/// Downloads each image, replaces the src attribute with a bundle-safe
-/// name (e.g. `txp-remote-0.png`), and returns the image bytes so the
-/// caller can register them in the AssetBundle.
-///
-/// ⚠️ fulgur's DummyNetProvider ignores `file://` and `http://` img srcs —
-/// AssetBundle registration is the ONLY path that renders images.
-/// ⚠️ fulgur drops `<img>` tags without an explicit size — we inject
-/// `style="width:Wpx;height:Hpx"` from the intrinsic image dimensions.
 /// Process `<img src="https?://...">` tags.
 ///
 /// Downloads each image, replaces the src attribute with a bundle-safe
@@ -203,10 +355,12 @@ fn image_dimensions(data: &[u8]) -> Option<(u32, u32)> {
 /// image dimensions.
 ///
 /// Failures are reported through `diag` (TP-1001 download failed,
-/// TP-1002 read/zero-byte) and never abort the render.
+/// TP-1002 read/zero-byte, TP-1003 over size cap) and never abort the
+/// render. `limits` gates scheme, host allowlist, and body size.
 pub fn download_remote_images(
     html: &mut String,
     diag: &mut Diagnostics,
+    limits: &AssetLimits,
 ) -> Result<Vec<(String, Vec<u8>)>> {
     let img_re =
         Regex::new(r#"(?i)<img\b[^>]*?\bsrc\s*=\s*["'](https?://[^"']+)["'][^>]*>"#).unwrap();
@@ -223,7 +377,7 @@ pub fn download_remote_images(
             continue;
         }
 
-        match download_to_cache(url, "images") {
+        match download_to_cache(url, "images", limits) {
             Ok(path) => match std::fs::read(&path) {
                 Ok(data) => {
                     if data.is_empty() {
@@ -257,7 +411,12 @@ pub fn download_remote_images(
                 }
             },
             Err(e) => {
-                diag.push("TP-1001", format!("failed to download image {url}: {e}"));
+                // Classify: size-cap violations get TP-1003, everything else TP-1001.
+                if let Some(DownloadError::TooLarge { .. }) = e.downcast_ref::<DownloadError>() {
+                    diag.push("TP-1003", format!("{e}"));
+                } else {
+                    diag.push("TP-1001", format!("failed to download image {url}: {e}"));
+                }
             }
         }
     }
@@ -320,7 +479,8 @@ mod tests {
     fn test_inject_remote_css_noop() {
         let mut html = "<html><head></head><body></body></html>".to_string();
         let mut diag = Diagnostics::new();
-        let n = inject_remote_css(&mut html, &mut diag).unwrap();
+        let limits = AssetLimits::default();
+        let n = inject_remote_css(&mut html, &mut diag, &limits).unwrap();
         assert_eq!(n, 0);
         assert!(diag.is_empty());
     }
@@ -329,9 +489,71 @@ mod tests {
     fn test_download_remote_images_noop() {
         let mut html = "<img src=\"data:image/png;base64,xxx\">".to_string();
         let mut diag = Diagnostics::new();
-        let images = download_remote_images(&mut html, &mut diag).unwrap();
+        let limits = AssetLimits::default();
+        let images = download_remote_images(&mut html, &mut diag, &limits).unwrap();
         assert!(images.is_empty());
         assert!(diag.is_empty());
+    }
+
+    #[test]
+    fn test_host_matches_glob() {
+        assert!(host_matches_glob("cdn.example.com", "*.example.com"));
+        // `*.example.com` needs a subdomain — bare apex does NOT match
+        assert!(!host_matches_glob("example.com", "*.example.com"));
+        assert!(host_matches_glob("a.b.example.com", "*.example.com"));
+        assert!(!host_matches_glob("evil.com", "*.example.com"));
+        assert!(host_matches_glob("anything", "*"));
+        assert!(host_matches_glob(
+            "static.example.com",
+            "static.example.com"
+        ));
+        assert!(!host_matches_glob(
+            "static2.example.com",
+            "static.example.com"
+        ));
+        // single `*` matches any host
+        assert!(host_matches_glob("example.com", "*"));
+    }
+
+    #[test]
+    fn test_check_url_scheme_and_allowlist() {
+        let https = AssetLimits::default();
+        assert!(https.check_url("https://example.com/img.png").is_ok());
+        // http blocked by default
+        assert!(https.check_url("http://example.com/img.png").is_err());
+        // allow_http lifts it
+        let http_ok = AssetLimits {
+            allow_http: true,
+            ..AssetLimits::default()
+        };
+        assert!(http_ok.check_url("http://example.com/img.png").is_ok());
+        // ftp always blocked
+        assert!(https.check_url("ftp://example.com/img.png").is_err());
+
+        // allowlist gates hosts
+        let list = AssetLimits {
+            allowlist: vec!["*.example.com".to_string()],
+            ..AssetLimits::default()
+        };
+        assert!(list.check_url("https://cdn.example.com/a.css").is_ok());
+        assert!(list.check_url("https://evil.net/a.css").is_err());
+    }
+
+    #[test]
+    fn test_check_size_cap() {
+        let cap = AssetLimits {
+            max_bytes: 100,
+            ..AssetLimits::default()
+        };
+        assert!(cap.check_size("https://x/a", 99).is_ok());
+        assert!(cap.check_size("https://x/a", 100).is_ok());
+        assert!(cap.check_size("https://x/a", 101).is_err());
+        // 0 = unlimited
+        let unlimited = AssetLimits {
+            max_bytes: 0,
+            ..AssetLimits::default()
+        };
+        assert!(unlimited.check_size("https://x/a", 10_000_000).is_ok());
     }
 
     #[test]

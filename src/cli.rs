@@ -112,6 +112,18 @@ pub struct Cli {
     /// Print SHA-256 hash of the output PDF
     #[arg(long)]
     pub hash: bool,
+    // Remote asset limits (images, CSS, fonts, emoji)
+    /// Max bytes for any downloaded asset; 0 = unlimited (default 10485760)
+    #[arg(long = "max-asset-size", default_value_t = 10 * 1024 * 1024)]
+    pub max_asset_size: u64,
+    /// Allow plain-http (non-TLS) asset downloads (default: https only)
+    #[arg(long = "allow-http")]
+    pub allow_http: bool,
+    /// Only fetch assets whose host matches these globs (e.g. *.example.com).
+    /// Comma-separated or repeatable; when set, non-matching hosts are
+    /// skipped with a warning.
+    #[arg(long = "asset-allowlist", value_delimiter = ',')]
+    pub asset_allowlist: Vec<String>,
 }
 
 impl Cli {

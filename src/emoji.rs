@@ -12,6 +12,7 @@
 //
 // Cache: ~/.cache/typepress/fonts/Noto-COLRv1.ttf
 
+use crate::network::AssetLimits;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -35,7 +36,7 @@ fn is_emoji_char(c: char) -> bool {
 
 /// Ensure COLRv1 emoji font is available locally.
 /// Downloads on first use; reuses cached copy thereafter.
-pub fn ensure_colr_emoji_font() -> Option<PathBuf> {
+pub fn ensure_colr_emoji_font(limits: &AssetLimits) -> Option<PathBuf> {
     let cache_dir = dirs_font_cache();
     let colr_path = cache_dir.join(COLR_FONT_FILENAME);
 
@@ -44,7 +45,7 @@ pub fn ensure_colr_emoji_font() -> Option<PathBuf> {
     }
 
     // Download (no renaming needed — COLRv1 format is the only one Krilla can use)
-    match download_colr_font(&colr_path) {
+    match download_colr_font(&colr_path, limits) {
         Ok(()) => {
             eprintln!("Emoji: COLRv1 font ready ({})", colr_path.display());
             Some(colr_path)
@@ -65,19 +66,42 @@ fn dirs_font_cache() -> PathBuf {
     home.join(".cache").join("typepress").join("fonts")
 }
 
-fn download_colr_font(dest: &PathBuf) -> Result<(), String> {
+fn download_colr_font(dest: &PathBuf, limits: &AssetLimits) -> Result<(), String> {
     let parent = dest.parent().ok_or("no parent dir")?;
     std::fs::create_dir_all(parent).map_err(|e| format!("mkdir: {e}"))?;
 
+    // Policy gates first: scheme + allowlist + size cap.
+    limits
+        .check_url(COLR_FONT_URL)
+        .map_err(|e| format!("policy: {e}"))?;
+
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::limited(5))
         .build()
         .map_err(|e| format!("client: {e}"))?;
     let response = client
         .get(COLR_FONT_URL)
         .send()
         .map_err(|e| format!("download: {e}"))?;
+
+    // Content-Length pre-check (fast reject before reading the body).
+    if limits.max_bytes > 0
+        && let Some(len) = response.content_length()
+        && len > limits.max_bytes
+    {
+        return Err(format!(
+            "font exceeds {} bytes ({}): {}",
+            limits.max_bytes, len, COLR_FONT_URL
+        ));
+    }
+
     let bytes = response.bytes().map_err(|e| format!("read: {e}"))?;
+
+    // Post-read size check.
+    limits
+        .check_size(COLR_FONT_URL, bytes.len())
+        .map_err(|e| format!("{e}"))?;
 
     if bytes.len() < 100_000 {
         return Err(format!("font too small: {} bytes", bytes.len()));
