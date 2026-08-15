@@ -5,6 +5,18 @@ edition = "2024"
 description = "Pure Rust HTML/CSS → PDF engine. No browser required."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/alitrack/typepress"
+# crates.io package contents: src + docs only. deps/ is local dev tooling
+# (vendored blitz-html fork) — never ship it; also avoids a corrupted
+# WSL dentry at deps/blitz-html that breaks `cargo package` directory scan.
+include = [
+    "src/**",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "Cargo.toml",
+    "Cargo.lock",
+]
 
 [dependencies]
 # Core engine: fulgur provides HTML→PDF pipeline (Blitz→Taffy→Krilla)
