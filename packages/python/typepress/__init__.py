@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.request import urlretrieve
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 _BINARY_NAME = "typepress"
 if sys.platform == "win32":
