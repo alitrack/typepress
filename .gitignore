@@ -5,3 +5,4 @@ deps/fulgur/target/
 deps/blitz-html
 fuzz/target
 examples/out/
+benchmarks/results/*.pdf
