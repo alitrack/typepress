@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use fulgur::config::{Margin, PageSize};
 use std::path::PathBuf;
 
@@ -10,6 +10,9 @@ use std::path::PathBuf;
     about = "Pure Rust HTML/CSS → PDF engine\n\nwkhtmltopdf compatible — use as a drop-in replacement."
 )]
 pub struct Cli {
+    /// Optional subcommand (serve = HTTP rendering server).
+    #[command(subcommand)]
+    pub command: Option<Command>,
     /// Input HTML file (omit for --stdin)
     pub input: Option<PathBuf>,
     /// Read HTML from stdin
@@ -316,4 +319,41 @@ pub fn read_input(input: Option<&PathBuf>, stdin: bool) -> Result<String> {
     } else {
         anyhow::bail!("provide an input HTML file or use --stdin")
     }
+}
+
+/// Subcommands (added v0.5.0: `typepress serve` HTTP rendering server).
+#[derive(Subcommand)]
+pub enum Command {
+    /// Start the HTTP rendering server (P2: Docker/HTTP API wrapper).
+    ///
+    /// Endpoints:
+    ///   GET  /healthz   — liveness probe ({"status":"ok","version":"x.y.z"})
+    ///   POST /render    — JSON body, returns application/pdf
+    ///
+    /// /render accepts a JSON object:
+    /// ```json
+    /// {
+    ///   "html": "<h1>Hello</h1>",        // or "markdown": "# Hello"
+    ///   "options": {
+    ///     "size": "A4", "landscape": false,
+    ///     "margin": "20mm", "header": "...", "footer": "...",
+    ///     "math": true, "fit": false, "autofit": false,
+    ///     "zoom": 1.0, "title": "...",
+    ///     "max_asset_size": 10485760,
+    ///     "allow_http": false,
+    ///     "asset_allowlist": ["*.example.com"]
+    ///   }
+    /// }
+    /// ```
+    Serve {
+        /// Address to bind (default: 127.0.0.1 — local only)
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        /// Port to listen on
+        #[arg(long, default_value_t = 8787)]
+        port: u16,
+        /// Maximum accepted request body size in bytes
+        #[arg(long = "max-body", default_value_t = 10 * 1024 * 1024)]
+        max_body: usize,
+    },
 }

@@ -93,6 +93,58 @@ page:
 math: true
 ```
 
+## HTTP Server
+
+Turn TypePress into a long-running service for app integration:
+
+```bash
+typepress serve                     # 127.0.0.1:8787 (local only)
+typepress serve --host 0.0.0.0 --port 9000 --max-body 20971520
+```
+
+```bash
+# Health probe
+curl http://127.0.0.1:8787/healthz
+# → {"status":"ok","version":"0.5.0"}
+
+# Render Markdown → PDF (inline bytes, no file writes)
+curl -X POST http://127.0.0.1:8787/render \
+  -H 'Content-Type: application/json' \
+  -d '{"markdown":"# Hello\n\n- a\n- b","options":{"math":true}}' \
+  -o out.pdf
+
+# Render raw HTML with per-request options
+curl -X POST http://127.0.0.1:8787/render \
+  -H 'Content-Type: application/json' \
+  -d '{"html":"<h1>Hi</h1>","options":{"size":"A3","landscape":true}}' \
+  -o out.pdf
+```
+
+Request options mirror the CLI flags (`size`, `landscape`, `margin`,
+`header`, `footer`, `math`, `fit`, `autofit`, `zoom`, `title`, `authors`,
+`no_system_fonts`, `max_asset_size`, `allow_http`, `asset_allowlist`,
+`strict`). With `"strict": true`, any diagnostic warning returns HTTP 422
+with the warning list instead of a PDF.
+
+Security posture: binds `127.0.0.1` by default, enforces a request-body
+cap (default 10 MiB), never touches the filesystem, and gates remote
+assets with the same limits as the CLI. Expose publicly only through a
+reverse proxy (nginx/Caddy).
+
+## Docker
+
+```bash
+docker build -t typepress .
+docker run --rm -p 8787:8787 typepress
+curl -X POST localhost:8787/render \
+  -H 'Content-Type: application/json' \
+  -d '{"markdown":"# Hello from Docker"}'
+```
+
+The image bundles Noto CJK / Core / Color-Emoji fonts plus `fontconfig`
+(fontdb discovers font directories via `/etc/fonts/fonts.conf`), and
+runs a HEALTHCHECK against `/healthz`.
+
 ## Comparison
 
 | | TypePress | wkhtmltopdf | Puppeteer | Paper Muncher |

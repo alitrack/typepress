@@ -1,0 +1,10 @@
+# TypePress .dockerignore — keep the build context lean
+# NOTE: deps/ is REQUIRED (local patches: fulgur, blitz-html, blitzhtml-vendor)
+target/
+.git/
+.github/
+tests/
+benches/
+tools/
+fuzz/
+*.md

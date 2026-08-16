@@ -1,6 +1,6 @@
 [package]
 name = "typepress"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 description = "Pure Rust HTML/CSS → PDF engine. No browser required."
 license = "MIT OR Apache-2.0"
@@ -52,6 +52,9 @@ env_logger = "0.11"
 base64 = "0.22.1"
 # SHA-256 for deterministic output verification
 sha2 = "0.10"
+# HTTP rendering server (P2) — tiny_http keeps the dependency tree minimal
+# (blocking, single-binary friendly; no tokio/hyper family)
+tiny_http = "0.12"
 
 [features]
 default = []
