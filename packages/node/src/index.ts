@@ -8,7 +8,7 @@ import { createGunzip } from "node:zlib";
 import { createWriteStream as fsCreateWriteStream } from "node:fs";
 import { Readable } from "node:stream";
 
-const VERSION = "0.5.0";
+const VERSION = "0.5.1";
 const GITHUB_RELEASES = "https://github.com/alitrack/typepress/releases/download";
 
 const BINARY_NAME = platform === "win32" ? "typepress.exe" : "typepress";
@@ -63,12 +63,12 @@ async function downloadFile(url: string, dest: string): Promise<void> {
   });
 }
 
-async function downloadBinary(version: string = VERSION): Promise<string> {
+/** Download the TypePress binary for this platform (used by CLI + API). */
+export async function downloadBinary(version: string = VERSION): Promise<string> {
   const cacheDir = getCacheDir();
   mkdirSync(cacheDir, { recursive: true });
   const cached = join(cacheDir, BINARY_NAME);
   if (existsSync(cached)) return cached;
-
   const plat = getPlatformTag();
   const ext = platform === "win32" ? "zip" : "tar.gz";
   const url = `${GITHUB_RELEASES}/v${version}/typepress-${plat}.${ext}`;
