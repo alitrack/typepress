@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>CSS Grid Layout — TypePress</title>
+  <style>
+    @page { size: A4; margin: 20mm; }
+    body { font-family: sans-serif; margin: 0; }
+    h1 { color: #1a5fb4; border-bottom: 2px solid #1a5fb4; padding-bottom: 6px; }
+    .card-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .card {
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 12px;
+      background: #fafafa;
+    }
+    .card h3 { margin: 0 0 6px; font-size: 14px; color: #333; }
+    .card p { margin: 0; font-size: 12px; color: #555; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+    .badge.green { background: #d5f5e3; color: #145a32; }
+    .badge.red { background: #fdecea; color: #922b21; }
+    .metrics { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 12px 0; }
+    .metrics dt { font-weight: bold; }
+    .metrics dd { margin: 0; }
+  </style>
+</head>
+<body>
+  <h1>CSS Grid Layout Example</h1>
+  <p>TypePress lays out this document with its <strong>CSS Grid</strong>
+  support — no browser process involved.</p>
+
+  <div class="card-grid">
+    <div class="card">
+      <h3>Grid support</h3>
+      <p>Three-column card grid rendered by Taffy.</p>
+      <span class="badge green">Native</span>
+    </div>
+    <div class="card">
+      <h3>Table fallback</h3>
+      <p>Documents without Grid still work via table layout.</p>
+      <span class="badge green">Fallback</span>
+    </div>
+    <div class="card">
+      <h3>No browser</h3>
+      <p>No Chromium, no Node — a single ~15MB binary.</p>
+      <span class="badge green">Standalone</span>
+    </div>
+  </div>
+
+  <h2>Metrics</h2>
+  <dl class="metrics">
+    <dt>Startup</dt><dd>~5 ms</dd>
+    <dt>Render (this page)</dt><dd>~50 ms</dd>
+    <dt>Output size</dt><dd>~90 KB</dd>
+    <dt>Deterministic</dt><dd>Identical SHA-256 per run</dd>
+  </dl>
+
+  <p><em>Example document — edit <code>examples/html-css-layout.html</code> to try your own layout.</em></p>
+</body>
+</html>

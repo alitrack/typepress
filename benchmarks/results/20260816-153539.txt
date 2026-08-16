@@ -1,0 +1,8 @@
+== TypePress benchmark 2026-08-16T15:35:39+08:00 ==
+binary size: 22M
+startup (mean of 10): 19 ms
+render (mean of 5): 134 ms
+output size: 48K
+pages: 2
+deterministic: YES (8c946d7749f05777…)
+
